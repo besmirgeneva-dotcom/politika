@@ -2,7 +2,6 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
 // --- CONFIGURATION FIREBASE ---
-// Accès standard via process.env
 const firebaseConfig = {
   apiKey: process.env.VITE_FIREBASE_API_KEY,
   authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -12,8 +11,8 @@ const firebaseConfig = {
   appId: process.env.VITE_FIREBASE_APP_ID
 };
 
-// Vérifie si la clé API est présente et valide
-const isConfigValid = !!firebaseConfig.apiKey;
+// Vérifie si la configuration minimale est présente
+const isConfigValid = !!firebaseConfig.apiKey && !!firebaseConfig.authDomain;
 
 let auth: any = null;
 
@@ -21,18 +20,21 @@ if (isConfigValid) {
     try {
         const app = initializeApp(firebaseConfig);
         auth = getAuth(app);
+        console.log("Firebase initialisé avec succès.");
     } catch (e) {
-        console.error("Erreur initialisation Firebase:", e);
+        console.error("Erreur critique initialisation Firebase:", e);
     }
 } else {
-    // Ne pas spammer la console en dev si pas de firebase, juste warn une fois
-    console.warn("Firebase non configuré : Variables VITE_FIREBASE_... manquantes.");
+    console.warn("Firebase non configuré : Variables d'environnement VITE_FIREBASE_* manquantes. L'authentification sera désactivée.");
 }
 
 export const isAuthAvailable = () => isConfigValid && !!auth;
 
 export const loginWithGoogle = async () => {
-    if (!auth) throw new Error("Firebase non configuré.");
+    if (!auth) {
+        alert("Erreur de configuration: Clés Firebase manquantes.");
+        throw new Error("Firebase non configuré.");
+    }
     const provider = new GoogleAuthProvider();
     return signInWithPopup(auth, provider);
 };
