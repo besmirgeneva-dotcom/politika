@@ -26,9 +26,9 @@ interface SaveMetadata {
 // --- SCREENS ---
 // 'portal_landing' : Site web façade
 // 'portal_dashboard' : Après connexion (Choix du jeu)
-// 'game_splash' | 'game_menu' | 'game_loading' | 'game_running' : Le jeu GeoSim original
+// 'game_splash' | 'game_loading' | 'game_running' : Le jeu GeoSim original
 type AppMode = 'portal_landing' | 'portal_dashboard' | 'game_active';
-type GameScreen = 'splash' | 'menu' | 'loading' | 'game';
+type GameScreen = 'splash' | 'loading' | 'game'; // 'menu' removed
 
 // Helper to determine initial power & corruption - AN 2000 CONTEXT
 const getInitialStats = (country: string): { power: number, corruption: number } => {
@@ -103,7 +103,7 @@ const App: React.FC = () => {
   
   // --- GAME INTERNAL STATE ---
   const [currentScreen, setCurrentScreen] = useState<GameScreen>('splash');
-  const [hasSave, setHasSave] = useState(false); // Used for "Continue" button on main menu
+  const [hasSave, setHasSave] = useState(false); // Still used to show indicator/button in dashboard if needed
   const [notification, setNotification] = useState<string | null>(null);
   
   // Settings & Load Menu State
@@ -183,12 +183,22 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Timer for Game Splash (Only when game is active)
+  // Timer for Game Splash (Transition to Loading)
   useEffect(() => {
       if (appMode === 'game_active' && currentScreen === 'splash') {
         const timer = setTimeout(() => {
-            setCurrentScreen('menu');
+            setCurrentScreen('loading'); // Go directly to loading, skipping menu
         }, 2500);
+        return () => clearTimeout(timer);
+      }
+  }, [appMode, currentScreen]);
+
+  // Timer for Game Loading (Transition to Game)
+  useEffect(() => {
+      if (appMode === 'game_active' && currentScreen === 'loading') {
+        const timer = setTimeout(() => {
+            setCurrentScreen('game');
+        }, 3000);
         return () => clearTimeout(timer);
       }
   }, [appMode, currentScreen]);
@@ -241,6 +251,11 @@ const App: React.FC = () => {
       if (saves.length === 0) setHasSave(false);
   };
 
+  const startLoadingSequence = () => {
+      setCurrentScreen('loading');
+      // The useEffect will handle the transition to 'game'
+  };
+
   const loadGameById = (id: string) => {
       const dataStr = localStorage.getItem(`${SAVE_DATA_PREFIX}${id}`);
       if (dataStr) {
@@ -283,49 +298,6 @@ const App: React.FC = () => {
       setTimeout(() => setNotification(null), 3000);
   }
 
-  const startNewGame = () => {
-      setGameState({
-        gameId: Date.now().toString(),
-        currentDate: INITIAL_DATE,
-        playerCountry: null,
-        ownedTerritories: [],
-        mapEntities: [],
-        turn: 1,
-        events: [],
-        isProcessing: false,
-        globalTension: 20,
-        economyHealth: 50,
-        militaryPower: 50,
-        popularity: 60,
-        corruption: 30,
-        hasNuclear: false,
-        hasSpaceProgram: false,
-        militaryRank: 100,
-        chatHistory: [],
-        chaosLevel: 'normal',
-        alliance: null,
-        isGameOver: false,
-        gameOverReason: null
-      });
-      setFullHistory([]);
-      setEventQueue([]);
-      setShowStartModal(true);
-      startLoadingSequence();
-  };
-
-  const startLoadingSequence = () => {
-      setCurrentScreen('loading');
-      setTimeout(() => {
-          setCurrentScreen('game');
-      }, 3000);
-  };
-
-  const handleQuitToMenu = () => {
-      setCurrentScreen('menu');
-      setIsSettingsOpen(false);
-      setGameState(prev => ({...prev, isGameOver: false}));
-  };
-  
   const handleExitToDashboard = () => {
       setIsSettingsOpen(false);
       setAppMode('portal_dashboard');
@@ -352,9 +324,38 @@ const App: React.FC = () => {
       setAppMode('portal_landing');
   };
 
+  // Launch New Game from Dashboard
   const launchGeoSim = () => {
+      // RESET STATE FOR A NEW GAME
+      setGameState({
+        gameId: Date.now().toString(),
+        currentDate: INITIAL_DATE,
+        playerCountry: null,
+        ownedTerritories: [],
+        mapEntities: [],
+        turn: 1,
+        events: [],
+        isProcessing: false,
+        globalTension: 20,
+        economyHealth: 50,
+        militaryPower: 50,
+        popularity: 60,
+        corruption: 30,
+        hasNuclear: false,
+        hasSpaceProgram: false,
+        militaryRank: 100,
+        chatHistory: [],
+        chaosLevel: 'normal',
+        alliance: null,
+        isGameOver: false,
+        gameOverReason: null
+      });
+      setFullHistory([]);
+      setEventQueue([]);
+      setShowStartModal(true);
+
       setAppMode('game_active');
-      setCurrentScreen('splash'); // Restart from splash for immersion
+      setCurrentScreen('splash'); // Splash -> Loading -> Game (handled by Effects)
   };
 
   // --- GAMEPLAY EFFECTS ---
@@ -826,14 +827,14 @@ const App: React.FC = () => {
                               </div>
                               <div className="flex gap-2">
                                 <button 
-                                    onClick={() => loadGameById(save.id)}
-                                    className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded shadow hover:bg-blue-500"
+                                    onClick={(e) => { e.stopPropagation(); loadGameById(save.id); }}
+                                    className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-colors shadow-sm"
                                 >
                                     Charger
                                 </button>
                                 <button 
-                                    onClick={() => deleteSave(save.id)}
-                                    className="px-2 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded hover:bg-red-200"
+                                    onClick={(e) => { e.stopPropagation(); deleteSave(save.id); }}
+                                    className="px-3 py-2 bg-white border border-slate-200 text-red-500 text-xs font-bold rounded-lg hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm"
                                     title="Supprimer"
                                 >
                                     🗑
@@ -1018,7 +1019,7 @@ const App: React.FC = () => {
                                   availableSaves.map(save => (
                                       <div key={save.id} className="group flex items-center gap-4 p-3 hover:bg-blue-50 rounded-xl transition-colors border border-transparent hover:border-blue-100">
                                           <div className="w-12 h-8 rounded bg-slate-200 overflow-hidden shadow-sm relative shrink-0">
-                                              <img src={getFlagUrl(save.country) || ''} className="w-full h-full object-cover" alt="" />
+                                              <img src={getFlagUrl(save.country) || ''} alt={save.country} className="w-full h-full object-cover" />
                                           </div>
                                           <div className="flex-1 min-w-0">
                                               <div className="font-bold text-slate-800 text-sm truncate">{save.country}</div>
@@ -1067,91 +1068,6 @@ const App: React.FC = () => {
         );
     }
 
-    if (currentScreen === 'menu') {
-        return (
-            <div className="w-screen h-screen bg-slate-50 relative overflow-hidden flex flex-col items-center justify-center font-sans">
-                <div className="absolute inset-0 opacity-10 bg-[url('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json')] bg-center bg-no-repeat bg-cover bg-blue-900"></div>
-                
-                {/* BACK TO DASHBOARD BUTTON */}
-                <button 
-                    onClick={handleExitToDashboard}
-                    className="absolute top-6 left-6 z-30 bg-white/80 backdrop-blur px-4 py-2 rounded-full font-bold text-xs shadow-md border border-slate-200 hover:bg-red-50 hover:text-red-600 transition-colors"
-                >
-                    ← Retour Tableau de bord
-                </button>
-
-                {/* AUTH BUTTON TOP RIGHT (Affichage user) */}
-                <div className="absolute top-4 right-4 z-20">
-                    {user && (
-                        <div className="flex items-center gap-3 bg-white/80 backdrop-blur px-3 py-2 rounded-full shadow-sm">
-                            <img src={user.photoURL} alt="user" className="w-8 h-8 rounded-full border border-stone-300" />
-                            <div className="flex flex-col text-right">
-                                <span className="text-xs font-bold text-stone-800">{user.displayName}</span>
-                            </div>
-                        </div>
-                    )}
-                </div>
-                
-                <div className="z-10 flex flex-col items-center gap-8 p-8 bg-white/70 backdrop-blur-xl rounded-3xl border border-white/50 shadow-2xl w-full max-w-md animate-scale-in">
-                    <GameLogo size="large" theme="light" />
-                    
-                    <div className="flex flex-col gap-3 w-full">
-                        <button 
-                            onClick={() => setIsSettingsOpen(true)}
-                            className="absolute top-0 right-0 m-4 p-2 text-slate-400 hover:text-slate-600"
-                            title="Paramètres"
-                        >
-                            ⚙️
-                        </button>
-
-                        <button 
-                            onClick={startNewGame}
-                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-lg shadow-lg shadow-emerald-200 transition-transform active:scale-95 uppercase tracking-wider"
-                        >
-                            Nouvelle Partie
-                        </button>
-                        
-                        <button 
-                            onClick={loadMostRecentGame}
-                            disabled={!hasSave}
-                            className={`w-full py-4 font-bold rounded-xl text-lg shadow-sm transition-transform uppercase tracking-wider border-2 ${
-                                hasSave 
-                                ? 'bg-white border-emerald-500 text-emerald-600 hover:bg-emerald-50 active:scale-95' 
-                                : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
-                            }`}
-                        >
-                            Continuer
-                        </button>
-
-                        <button 
-                            onClick={openLoadMenu}
-                            disabled={!hasSave}
-                            className={`w-full py-4 font-bold rounded-xl text-lg shadow-sm transition-transform uppercase tracking-wider border-2 ${
-                                hasSave 
-                                ? 'bg-white border-blue-500 text-blue-600 hover:bg-blue-50 active:scale-95' 
-                                : 'bg-slate-100 border-slate-200 text-slate-400 opacity-70 cursor-not-allowed'
-                            }`}
-                        >
-                            Charger
-                        </button>
-
-                        <button 
-                            onClick={handleExitToDashboard}
-                            className="w-full py-4 bg-transparent border-2 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-500 hover:bg-red-50 font-bold rounded-xl text-lg transition-colors active:scale-95 uppercase tracking-wider"
-                        >
-                            Quitter
-                        </button>
-                    </div>
-
-                    <div className="text-slate-400 text-xs font-semibold">v1.2.0 - Scénario 2000</div>
-                </div>
-                
-                {/* Load Menu Overlay on Main Menu */}
-                {isLoadMenuOpen && renderLoadMenuOverlay()}
-            </div>
-        );
-    }
-
     if (currentScreen === 'loading') {
         return (
             <div className="w-screen h-screen bg-slate-50 flex flex-col items-center justify-center text-emerald-600 font-mono">
@@ -1195,10 +1111,10 @@ const App: React.FC = () => {
                         Votre mandat s'achève ici, dans les ruines de l'histoire.
                     </div>
                     <button 
-                        onClick={handleQuitToMenu}
+                        onClick={handleExitToDashboard}
                         className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-widest rounded shadow-lg transition-transform hover:scale-105 active:scale-95"
                     >
-                        Retour au Menu
+                        Retour au Tableau de bord
                     </button>
                 </div>
             </div>
@@ -1535,7 +1451,6 @@ const App: React.FC = () => {
                             <button onClick={() => saveGame(gameState, fullHistory, true)} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow">Sauvegarder la partie</button>
                             <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow">Charger une partie</button>
                             <button onClick={() => setIsSettingsOpen(false)} className="w-full py-3 bg-stone-800 text-white font-bold rounded-lg">Reprendre</button>
-                            <button onClick={handleQuitToMenu} className="w-full py-3 bg-stone-300 text-stone-700 font-bold rounded-lg">Menu Principal</button>
                             <button onClick={handleExitToDashboard} className="w-full py-3 bg-stone-200 text-stone-600 font-bold rounded-lg">Quitter vers Tableau de bord</button>
                         </div>
                     </div>
