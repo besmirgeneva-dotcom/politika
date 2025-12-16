@@ -12,8 +12,6 @@ import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeTo
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, limit } from 'firebase/firestore';
 
 const INITIAL_DATE = new Date('2000-01-01');
-const SAVES_INDEX_KEY = 'GEOSIM_SAVES_INDEX'; // Stores list of metadata (Local Only)
-const SAVE_DATA_PREFIX = 'GEOSIM_GAME_';    // Prefix for actual data (Local Only)
 
 // --- TYPES FOR SAVE SYSTEM ---
 interface SaveMetadata {
@@ -188,7 +186,8 @@ const App: React.FC = () => {
             setShowLoginModal(false); // Close modal if open
         } else {
             setAppMode('portal_landing');
-            refreshSaves(null); // Fetch local saves
+            setAvailableSaves([]); // No local saves anymore
+            setHasSave(false);
         }
     });
 
@@ -219,91 +218,80 @@ const App: React.FC = () => {
   }, [appMode, currentScreen]);
 
 
-  // --- SAVE SYSTEM LOGIC (HYBRID: CLOUD + LOCAL) ---
+  // --- SAVE SYSTEM LOGIC (CLOUD ONLY) ---
 
   const refreshSaves = async (currentUser: any) => {
-      if (!isMountedRef.current) return;
-      setIsSyncing(true);
-      setAvailableSaves([]); // Reset to avoid stale data display
+      if (!isMountedRef.current || !currentUser || !db) return;
       
-      // Helper for Timeout
-      const withTimeout = (promise: Promise<any>, ms: number = 5000) => {
+      setIsSyncing(true);
+      setAvailableSaves([]); 
+      
+      // Extended Timeout to 15s to handle slow cold starts
+      const withTimeout = (promise: Promise<any>, ms: number = 15000) => {
           return Promise.race([
               promise,
               new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), ms))
           ]);
       };
 
-      if (currentUser && db) {
-          // CLOUD MODE - OPTIMIZED
-          try {
-              // 1. Try fetch optimized metadata with TIMEOUT
-              const metaSnapshot = await withTimeout(
-                  getDocs(collection(db, "users", currentUser.uid, "game_metas"))
-              ) as any;
-              
-              if (isMountedRef.current) {
-                  if (!metaSnapshot.empty) {
-                      const cloudSaves = metaSnapshot.docs.map((d: any) => d.data() as SaveMetadata);
-                      cloudSaves.sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
-                      setAvailableSaves(cloudSaves);
-                      setHasSave(cloudSaves.length > 0);
-                  } else {
-                      // 2. Fallback: Check legacy 'games' ONLY if metadata is empty.
-                      // Use LIMIT to avoid massive download freeze.
-                      console.log("No metadata found. Checking legacy...");
-                      const gameSnapshot = await withTimeout(
-                          getDocs(query(collection(db, "users", currentUser.uid, "games"), limit(10)))
-                      ) as any;
-                      
-                      const legacySaves: SaveMetadata[] = [];
-                      const batch = writeBatch(db);
-                      let needsMigration = false;
+      try {
+          // 1. Try fetch optimized metadata with TIMEOUT
+          const metaSnapshot = await withTimeout(
+              getDocs(collection(db, "users", currentUser.uid, "game_metas"))
+          ) as any;
+          
+          if (isMountedRef.current) {
+              if (!metaSnapshot.empty) {
+                  const cloudSaves = metaSnapshot.docs.map((d: any) => d.data() as SaveMetadata);
+                  cloudSaves.sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
+                  setAvailableSaves(cloudSaves);
+                  setHasSave(cloudSaves.length > 0);
+              } else {
+                  // 2. Fallback: Check legacy 'games' ONLY if metadata is empty.
+                  console.log("No metadata found. Checking legacy...");
+                  const gameSnapshot = await withTimeout(
+                      getDocs(query(collection(db, "users", currentUser.uid, "games"), limit(10)))
+                  ) as any;
+                  
+                  const legacySaves: SaveMetadata[] = [];
+                  const batch = writeBatch(db);
+                  let needsMigration = false;
 
-                      gameSnapshot.forEach((docSnap: any) => {
-                          const data = docSnap.data();
-                          if (data.metadata) {
-                              legacySaves.push(data.metadata);
-                              const metaRef = doc(db, "users", currentUser.uid, "game_metas", docSnap.id);
-                              batch.set(metaRef, data.metadata);
-                              needsMigration = true;
-                          }
-                      });
-
-                      if (needsMigration) {
-                          batch.commit().catch(e => console.warn("Migration background fail", e));
+                  gameSnapshot.forEach((docSnap: any) => {
+                      const data = docSnap.data();
+                      if (data.metadata) {
+                          legacySaves.push(data.metadata);
+                          const metaRef = doc(db, "users", currentUser.uid, "game_metas", docSnap.id);
+                          batch.set(metaRef, data.metadata);
+                          needsMigration = true;
                       }
+                  });
 
-                      legacySaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
-                      setAvailableSaves(legacySaves);
-                      setHasSave(legacySaves.length > 0);
+                  if (needsMigration) {
+                      batch.commit().catch(e => console.warn("Migration background fail", e));
                   }
+
+                  legacySaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
+                  setAvailableSaves(legacySaves);
+                  setHasSave(legacySaves.length > 0);
               }
-          } catch (e) {
-              console.error("Cloud fetch error (or timeout):", e);
-              if (isMountedRef.current) showNotification("Sync Cloud lente ou échouée");
           }
-      } else {
-          // LOCAL MODE
-          const str = localStorage.getItem(SAVES_INDEX_KEY);
-          if (str) {
-            try {
-                const localSaves = JSON.parse(str).sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
-                if (isMountedRef.current) {
-                    setAvailableSaves(localSaves);
-                    setHasSave(localSaves.length > 0);
-                }
-            } catch (e) { 
-                if (isMountedRef.current) setAvailableSaves([]); 
-            }
-          } else {
-              if (isMountedRef.current) setAvailableSaves([]);
-          }
+      } catch (e) {
+          console.error("Cloud fetch error (or timeout):", e);
+          if (isMountedRef.current) showNotification("Erreur Sync Cloud (Connexion?)");
       }
+      
       if (isMountedRef.current) setIsSyncing(false);
   };
 
   const saveGame = async (state: GameState, history: GameEvent[], showNotif = true) => {
+      // CLOUD ONLY - REJECT IF NO USER
+      if (!user || !db) {
+          showNotification("Connexion requise pour sauvegarder !");
+          if (!user) setShowLoginModal(true);
+          return;
+      }
+
       const metadata: SaveMetadata = {
           id: state.gameId,
           country: state.playerCountry || "Inconnu",
@@ -313,95 +301,57 @@ const App: React.FC = () => {
       };
       
       const fullData = { metadata, state, history, aiProvider };
-      // Sanitize: removes 'undefined' fields and converts Dates to strings
+      // Sanitize: removes 'undefined' fields
       const sanitizedData = JSON.parse(JSON.stringify(fullData));
 
-      if (user && db) {
-          // SAVE TO CLOUD (OPTIMIZED: Data + Metadata separately)
-          try {
-             const batch = writeBatch(db);
-             
-             // 1. Save Full Data (Heavy)
-             const gameRef = doc(db, "users", user.uid, "games", state.gameId);
-             batch.set(gameRef, sanitizedData);
+      try {
+          const batch = writeBatch(db);
+          
+          // 1. Save Full Data (Heavy)
+          const gameRef = doc(db, "users", user.uid, "games", state.gameId);
+          batch.set(gameRef, sanitizedData);
 
-             // 2. Save Metadata Index (Light)
-             const metaRef = doc(db, "users", user.uid, "game_metas", state.gameId);
-             batch.set(metaRef, metadata);
+          // 2. Save Metadata Index (Light)
+          const metaRef = doc(db, "users", user.uid, "game_metas", state.gameId);
+          batch.set(metaRef, metadata);
 
-             await batch.commit();
+          // AWAIT COMPLETION before refreshing UI
+          await batch.commit();
 
-             if (showNotif) showNotification("Sauvegarde Cloud OK");
-             
-             // Update list immediately
-             await refreshSaves(user);
-          } catch (e) {
-             console.error("Cloud save failed", e);
-             showNotification("Échec Sauvegarde Cloud (Connexion?)");
-             
-             // Fallback local? Optional, but safer to keep data.
-             // localStorage.setItem(`${SAVE_DATA_PREFIX}${state.gameId}`, JSON.stringify(fullData));
-          }
-      } else {
-          // SAVE LOCALLY
-          try {
-              localStorage.setItem(`${SAVE_DATA_PREFIX}${state.gameId}`, JSON.stringify(fullData));
-              
-              // Update Local Index
-              const str = localStorage.getItem(SAVES_INDEX_KEY);
-              let saves: SaveMetadata[] = str ? JSON.parse(str) : [];
-              const existingIdx = saves.findIndex(s => s.id === state.gameId);
-              if (existingIdx >= 0) saves[existingIdx] = metadata;
-              else saves.push(metadata);
-              
-              localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
-              setAvailableSaves(saves);
-              setHasSave(true);
-              if (showNotif) showNotification("Sauvegarde Locale OK");
-          } catch (e) {
-              console.error("Local save failed (Quota?)", e);
-              showNotification("Erreur Sauvegarde (Quota Local)");
-          }
+          if (showNotif) showNotification("Sauvegarde Cloud réussie !");
+          
+          // Refresh list immediately to reflect changes
+          await refreshSaves(user);
+      } catch (e) {
+          console.error("Cloud save failed", e);
+          showNotification("Échec Sauvegarde Cloud");
       }
   };
 
   const deleteSave = async (id: string) => {
-      if (user && db) {
-          // DELETE CLOUD (Both Data and Meta)
-          try {
-              const batch = writeBatch(db);
-              batch.delete(doc(db, "users", user.uid, "games", id));
-              batch.delete(doc(db, "users", user.uid, "game_metas", id));
-              await batch.commit();
-              
-              refreshSaves(user);
-          } catch (e) { console.error("Cloud delete failed", e); }
-      } else {
-          // DELETE LOCAL
-          localStorage.removeItem(`${SAVE_DATA_PREFIX}${id}`);
-          const str = localStorage.getItem(SAVES_INDEX_KEY);
-          if (str) {
-            let saves: SaveMetadata[] = JSON.parse(str);
-            saves = saves.filter(s => s.id !== id);
-            localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
-            setAvailableSaves(saves);
-            if (saves.length === 0) setHasSave(false);
-          }
-      }
+      if (!user || !db) return;
+
+      try {
+          const batch = writeBatch(db);
+          batch.delete(doc(db, "users", user.uid, "games", id));
+          batch.delete(doc(db, "users", user.uid, "game_metas", id));
+          await batch.commit();
+          
+          refreshSaves(user);
+      } catch (e) { console.error("Cloud delete failed", e); }
   };
 
   const loadGameById = async (id: string) => {
-      if (isGlobalLoading) return; // Prevent double clicks
+      if (isGlobalLoading) return; 
       
-      setIsGlobalLoading(true); // START LOADING VISUAL
+      setIsGlobalLoading(true); 
       let data: any = null;
 
       if (user && db) {
-          // LOAD CLOUD
           try {
-              // Timeout fetch to prevent hanging
+              // Timeout fetch to prevent hanging - 15s
               const fetchPromise = getDoc(doc(db, "users", user.uid, "games", id));
-              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000));
+              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 15000));
               
               const docSnap = await Promise.race([fetchPromise, timeoutPromise]) as any;
               
@@ -411,14 +361,8 @@ const App: React.FC = () => {
           } catch (e) {
               console.error("Cloud load error", e);
               showNotification("Erreur chargement Cloud (Timeout/Réseau)");
-              setIsGlobalLoading(false); // STOP LOADING
+              setIsGlobalLoading(false);
               return;
-          }
-      } else {
-          // LOAD LOCAL
-          const dataStr = localStorage.getItem(`${SAVE_DATA_PREFIX}${id}`);
-          if (dataStr) {
-             try { data = JSON.parse(dataStr); } catch (e) {}
           }
       }
 
@@ -436,7 +380,6 @@ const App: React.FC = () => {
               // Launch Game
               setAppMode('game_active');
               startLoadingSequence();
-              // Note: isGlobalLoading reset is not strictly needed here as screen changes, but good practice
               setIsGlobalLoading(false); 
               showNotification(`Partie chargée: ${data.state.playerCountry}`);
           } catch (e) {
@@ -446,7 +389,7 @@ const App: React.FC = () => {
           }
       } else {
           showNotification("Données introuvables.");
-          setIsGlobalLoading(false); // Data not found
+          setIsGlobalLoading(false); 
       }
 
       setIsSettingsOpen(false);
@@ -460,26 +403,23 @@ const App: React.FC = () => {
   };
 
   const openLoadMenu = () => {
-      // Refresh happens automatically on auth change, but good to ensure latest
       refreshSaves(user);
       setIsLoadMenuOpen(true);
   };
 
   const startLoadingSequence = () => {
       setCurrentScreen('loading');
-      // The useEffect will handle the transition to 'game'
   };
 
   const showNotification = (msg: string) => {
       setNotification(msg);
-      setTimeout(() => setNotification(null), 2000); // 2 seconds delay
+      setTimeout(() => setNotification(null), 3000); 
   }
 
   const handleExitToDashboard = () => {
       setIsSettingsOpen(false);
       setAppMode('portal_dashboard');
-      setIsGlobalLoading(false); // Ensure loading is off when returning
-      // Refresh saves when returning to dashboard to ensure latest info
+      setIsGlobalLoading(false); 
       refreshSaves(user);
   };
 
@@ -1068,7 +1008,9 @@ const App: React.FC = () => {
                   {isSyncing && availableSaves.length === 0 ? (
                       <div className="text-center text-slate-400 py-10 animate-pulse">Sync avec le Cloud...</div>
                   ) : availableSaves.length === 0 ? (
-                      <div className="text-center text-slate-400 py-10 italic">Aucune sauvegarde trouvée.</div>
+                      <div className="text-center text-slate-400 py-10 italic">
+                          {user ? "Aucune sauvegarde Cloud trouvée." : "Connectez-vous pour voir vos sauvegardes."}
+                      </div>
                   ) : (
                       availableSaves.map((save) => (
                           <div key={save.id} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex items-center gap-3 hover:bg-blue-50 transition-colors group">
@@ -1353,7 +1295,7 @@ const App: React.FC = () => {
                       <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm flex flex-col h-80 col-span-1 md:col-span-1 lg:col-span-2">
                           <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                               <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                  <span>💾</span> Sauvegardes {user ? "(Cloud)" : "(Local)"}
+                                  <span>💾</span> Sauvegardes Cloud
                               </h3>
                               <span className="text-xs text-slate-400 font-mono">
                                 {isSyncing ? "Sync..." : `${availableSaves.length} fichiers`}
@@ -1875,13 +1817,9 @@ const App: React.FC = () => {
                         <div className="pt-4 border-t border-stone-200 flex flex-col gap-2">
                             <button 
                                 onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} 
-                                className={`w-full py-3 text-white font-bold rounded-lg shadow flex items-center justify-center gap-2 ${
-                                    user && db 
-                                    ? 'bg-emerald-600 hover:bg-emerald-500' 
-                                    : 'bg-orange-600 hover:bg-orange-500'
-                                }`}
+                                className="w-full py-3 text-white font-bold rounded-lg shadow flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500"
                             >
-                                {user && db ? "☁️ Sauvegarder (Cloud)" : "💾 Sauvegarder (Local)"}
+                                ☁️ Sauvegarder (Cloud)
                             </button>
                             <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow">Charger une partie</button>
                             <button onClick={() => setIsSettingsOpen(false)} className="w-full py-3 bg-stone-800 text-white font-bold rounded-lg">Reprendre</button>
