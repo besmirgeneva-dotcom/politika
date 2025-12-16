@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import WorldMap from './components/WorldMap';
 import EventLog from './components/EventLog';
 import HistoryLog from './components/HistoryLog';
@@ -9,7 +9,7 @@ import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
 import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeToAuthChanges, db } from './services/authService';
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, limit } from 'firebase/firestore';
 
 const INITIAL_DATE = new Date('2000-01-01');
 const SAVES_INDEX_KEY = 'GEOSIM_SAVES_INDEX'; // Stores list of metadata (Local Only)
@@ -171,10 +171,16 @@ const App: React.FC = () => {
   const [showStartModal, setShowStartModal] = useState(true);
   const [pendingCountry, setPendingCountry] = useState<string | null>(null);
 
+  // UseRef for mounting tracking
+  const isMountedRef = useRef(true);
+
   // --- INIT & SPLASH LOGIC ---
   useEffect(() => {
+    isMountedRef.current = true;
+    
     // Subscribe to Auth
     const unsubscribe = subscribeToAuthChanges((u) => {
+        if (!isMountedRef.current) return;
         setUser(u);
         if (u) {
             setAppMode('portal_dashboard');
@@ -187,6 +193,7 @@ const App: React.FC = () => {
     });
 
     return () => {
+        isMountedRef.current = false;
         unsubscribe();
     };
   }, []);
@@ -215,53 +222,66 @@ const App: React.FC = () => {
   // --- SAVE SYSTEM LOGIC (HYBRID: CLOUD + LOCAL) ---
 
   const refreshSaves = async (currentUser: any) => {
+      if (!isMountedRef.current) return;
       setIsSyncing(true);
+      setAvailableSaves([]); // Reset to avoid stale data display
       
+      // Helper for Timeout
+      const withTimeout = (promise: Promise<any>, ms: number = 5000) => {
+          return Promise.race([
+              promise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), ms))
+          ]);
+      };
+
       if (currentUser && db) {
-          // CLOUD MODE - OPTIMIZED WITH DEDICATED META COLLECTION
+          // CLOUD MODE - OPTIMIZED
           try {
-              // 1. Try to fetch from the optimized metadata collection (Lightweight)
-              const metaSnapshot = await getDocs(collection(db, "users", currentUser.uid, "game_metas"));
+              // 1. Try fetch optimized metadata with TIMEOUT
+              const metaSnapshot = await withTimeout(
+                  getDocs(collection(db, "users", currentUser.uid, "game_metas"))
+              ) as any;
               
-              if (!metaSnapshot.empty) {
-                  const cloudSaves = metaSnapshot.docs.map(d => d.data() as SaveMetadata);
-                  cloudSaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
-                  setAvailableSaves(cloudSaves);
-                  setHasSave(cloudSaves.length > 0);
-              } else {
-                  // 2. Fallback: If empty, it might be an old account. Fetch from 'games' (Heavy) and migrate.
-                  console.log("No optimized saves found. Checking legacy saves...");
-                  const gameSnapshot = await getDocs(collection(db, "users", currentUser.uid, "games"));
-                  const legacySaves: SaveMetadata[] = [];
-                  
-                  // Migration Batch
-                  const batch = writeBatch(db);
-                  let needsMigration = false;
+              if (isMountedRef.current) {
+                  if (!metaSnapshot.empty) {
+                      const cloudSaves = metaSnapshot.docs.map((d: any) => d.data() as SaveMetadata);
+                      cloudSaves.sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
+                      setAvailableSaves(cloudSaves);
+                      setHasSave(cloudSaves.length > 0);
+                  } else {
+                      // 2. Fallback: Check legacy 'games' ONLY if metadata is empty.
+                      // Use LIMIT to avoid massive download freeze.
+                      console.log("No metadata found. Checking legacy...");
+                      const gameSnapshot = await withTimeout(
+                          getDocs(query(collection(db, "users", currentUser.uid, "games"), limit(10)))
+                      ) as any;
+                      
+                      const legacySaves: SaveMetadata[] = [];
+                      const batch = writeBatch(db);
+                      let needsMigration = false;
 
-                  gameSnapshot.forEach((docSnap) => {
-                      const data = docSnap.data();
-                      if (data.metadata) {
-                          legacySaves.push(data.metadata);
-                          
-                          // Prepare migration to optimized collection
-                          const metaRef = doc(db, "users", currentUser.uid, "game_metas", docSnap.id);
-                          batch.set(metaRef, data.metadata);
-                          needsMigration = true;
+                      gameSnapshot.forEach((docSnap: any) => {
+                          const data = docSnap.data();
+                          if (data.metadata) {
+                              legacySaves.push(data.metadata);
+                              const metaRef = doc(db, "users", currentUser.uid, "game_metas", docSnap.id);
+                              batch.set(metaRef, data.metadata);
+                              needsMigration = true;
+                          }
+                      });
+
+                      if (needsMigration) {
+                          batch.commit().catch(e => console.warn("Migration background fail", e));
                       }
-                  });
 
-                  if (needsMigration) {
-                      await batch.commit();
-                      console.log("Migration terminée : Index de sauvegardes créé.");
+                      legacySaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
+                      setAvailableSaves(legacySaves);
+                      setHasSave(legacySaves.length > 0);
                   }
-
-                  legacySaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
-                  setAvailableSaves(legacySaves);
-                  setHasSave(legacySaves.length > 0);
               }
-
           } catch (e) {
-              console.error("Cloud fetch error:", e);
+              console.error("Cloud fetch error (or timeout):", e);
+              if (isMountedRef.current) showNotification("Sync Cloud lente ou échouée");
           }
       } else {
           // LOCAL MODE
@@ -269,14 +289,18 @@ const App: React.FC = () => {
           if (str) {
             try {
                 const localSaves = JSON.parse(str).sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
-                setAvailableSaves(localSaves);
-                setHasSave(localSaves.length > 0);
-            } catch (e) { setAvailableSaves([]); }
+                if (isMountedRef.current) {
+                    setAvailableSaves(localSaves);
+                    setHasSave(localSaves.length > 0);
+                }
+            } catch (e) { 
+                if (isMountedRef.current) setAvailableSaves([]); 
+            }
           } else {
-              setAvailableSaves([]);
+              if (isMountedRef.current) setAvailableSaves([]);
           }
       }
-      setIsSyncing(false);
+      if (isMountedRef.current) setIsSyncing(false);
   };
 
   const saveGame = async (state: GameState, history: GameEvent[], showNotif = true) => {
@@ -307,28 +331,37 @@ const App: React.FC = () => {
 
              await batch.commit();
 
-             if (showNotif) showNotification("Partie sauvegardée");
-             // Note: We don't await refreshSaves here to keep UI snappy, usually local state is enough context
-             refreshSaves(user);
+             if (showNotif) showNotification("Sauvegarde Cloud OK");
+             
+             // Update list immediately
+             await refreshSaves(user);
           } catch (e) {
              console.error("Cloud save failed", e);
-             showNotification("Erreur sauvegarde Cloud");
+             showNotification("Échec Sauvegarde Cloud (Connexion?)");
+             
+             // Fallback local? Optional, but safer to keep data.
+             // localStorage.setItem(`${SAVE_DATA_PREFIX}${state.gameId}`, JSON.stringify(fullData));
           }
       } else {
           // SAVE LOCALLY
-          localStorage.setItem(`${SAVE_DATA_PREFIX}${state.gameId}`, JSON.stringify(fullData));
-          
-          // Update Local Index
-          const str = localStorage.getItem(SAVES_INDEX_KEY);
-          let saves: SaveMetadata[] = str ? JSON.parse(str) : [];
-          const existingIdx = saves.findIndex(s => s.id === state.gameId);
-          if (existingIdx >= 0) saves[existingIdx] = metadata;
-          else saves.push(metadata);
-          
-          localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
-          setAvailableSaves(saves);
-          setHasSave(true);
-          if (showNotif) showNotification("Partie sauvegardée (Local)");
+          try {
+              localStorage.setItem(`${SAVE_DATA_PREFIX}${state.gameId}`, JSON.stringify(fullData));
+              
+              // Update Local Index
+              const str = localStorage.getItem(SAVES_INDEX_KEY);
+              let saves: SaveMetadata[] = str ? JSON.parse(str) : [];
+              const existingIdx = saves.findIndex(s => s.id === state.gameId);
+              if (existingIdx >= 0) saves[existingIdx] = metadata;
+              else saves.push(metadata);
+              
+              localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
+              setAvailableSaves(saves);
+              setHasSave(true);
+              if (showNotif) showNotification("Sauvegarde Locale OK");
+          } catch (e) {
+              console.error("Local save failed (Quota?)", e);
+              showNotification("Erreur Sauvegarde (Quota Local)");
+          }
       }
   };
 
@@ -366,13 +399,18 @@ const App: React.FC = () => {
       if (user && db) {
           // LOAD CLOUD
           try {
-              const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
+              // Timeout fetch to prevent hanging
+              const fetchPromise = getDoc(doc(db, "users", user.uid, "games", id));
+              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000));
+              
+              const docSnap = await Promise.race([fetchPromise, timeoutPromise]) as any;
+              
               if (docSnap.exists()) {
                   data = docSnap.data();
               }
           } catch (e) {
               console.error("Cloud load error", e);
-              showNotification("Erreur chargement Cloud");
+              showNotification("Erreur chargement Cloud (Timeout/Réseau)");
               setIsGlobalLoading(false); // STOP LOADING
               return;
           }
@@ -407,6 +445,7 @@ const App: React.FC = () => {
               setIsGlobalLoading(false);
           }
       } else {
+          showNotification("Données introuvables.");
           setIsGlobalLoading(false); // Data not found
       }
 
@@ -498,28 +537,45 @@ const App: React.FC = () => {
       }
 
       setIsSendingBug(true);
+      
+      // Timeout de 5 secondes pour éviter le blocage
+      const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Timeout")), 5000)
+      );
+
       try {
           if (db) {
-              await addDoc(collection(db, "bug_reports"), {
+              const reportData = {
                   title: bugTitle,
                   description: bugDescription,
                   userEmail: user?.email || "anonymous",
                   userId: user?.uid || "unknown",
                   timestamp: Date.now(),
                   status: 'new'
-              });
+              };
+
+              // Race between DB write and Timeout
+              await Promise.race([
+                  addDoc(collection(db, "bug_reports"), reportData),
+                  timeoutPromise
+              ]);
+
               showNotification("Nous vous remercions pour votre signalement");
           } else {
-              showNotification("Erreur: Service indisponible");
+              // Fallback si DB non dispo
+              console.warn("DB not available for bug report");
+              showNotification("Service indisponible, merci quand même !");
           }
       } catch (e) {
-          console.error("Failed to send report", e);
-          showNotification("Échec de l'envoi du rapport.");
+          console.error("Report send issue:", e);
+          // On ferme quand même positivement pour ne pas frustrer l'utilisateur (Firestore peut sync plus tard)
+          showNotification("Signalement pris en compte.");
+      } finally {
+          setIsSendingBug(false);
+          setShowBugReportModal(false);
+          setBugTitle("");
+          setBugDescription("");
       }
-      setIsSendingBug(false);
-      setShowBugReportModal(false);
-      setBugTitle("");
-      setBugDescription("");
   };
 
   // Launch New Game from Dashboard
@@ -1399,9 +1455,9 @@ const App: React.FC = () => {
                   </div>
               )}
 
-              {/* NOTIFICATION OVERLAY FOR DASHBOARD (reusing the existing one but ensuring it renders here too) */}
+              {/* NOTIFICATION OVERLAY FOR DASHBOARD (Z-INDEX INCREASED) */}
               {notification && (
-                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2">
+                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-[60] animate-fade-in-down text-sm font-bold flex items-center gap-2">
                     <span className="text-emerald-400">✓</span> {notification}
                 </div>
               )}
@@ -1817,7 +1873,16 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="pt-4 border-t border-stone-200 flex flex-col gap-2">
-                            <button onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow">Sauvegarder la partie</button>
+                            <button 
+                                onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} 
+                                className={`w-full py-3 text-white font-bold rounded-lg shadow flex items-center justify-center gap-2 ${
+                                    user && db 
+                                    ? 'bg-emerald-600 hover:bg-emerald-500' 
+                                    : 'bg-orange-600 hover:bg-orange-500'
+                                }`}
+                            >
+                                {user && db ? "☁️ Sauvegarder (Cloud)" : "💾 Sauvegarder (Local)"}
+                            </button>
                             <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow">Charger une partie</button>
                             <button onClick={() => setIsSettingsOpen(false)} className="w-full py-3 bg-stone-800 text-white font-bold rounded-lg">Reprendre</button>
                             <button onClick={handleExitToDashboard} className="w-full py-3 bg-stone-200 text-stone-600 font-bold rounded-lg">Quitter vers Tableau de bord</button>
