@@ -245,11 +245,13 @@ const App: React.FC = () => {
       };
       
       const fullData = { metadata, state, history, aiProvider };
+      // Sanitize: removes 'undefined' fields (Firestore rejects them) and converts Dates to strings
+      const sanitizedData = JSON.parse(JSON.stringify(fullData));
 
       if (user && db) {
           // SAVE TO CLOUD
           try {
-             await setDoc(doc(db, "users", user.uid, "games", state.gameId), fullData);
+             await setDoc(doc(db, "users", user.uid, "games", state.gameId), sanitizedData);
              if (showNotif) showNotification("Partie sauvegardée (Cloud)");
              refreshSaves(user);
           } catch (e) {
