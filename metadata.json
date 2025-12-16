@@ -1,0 +1,6 @@
+{
+  "name": "GeoSim",
+  "description": "A turn-based geopolitical strategy game where you lead a nation and the AI simulates the rest of the world.",
+  "checkpoint": "version de base fonctionnel",
+  "requestFramePermissions": []
+}
