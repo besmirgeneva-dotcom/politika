@@ -862,12 +862,15 @@ const App: React.FC = () => {
                   </div>
 
                   {/* Right Button */}
-                  <button 
-                    onClick={handleLogin}
-                    className="absolute right-6 text-sm font-bold border-2 border-black px-4 py-2 rounded-lg hover:bg-black hover:text-white transition-colors"
-                  >
-                      Se connecter
-                  </button>
+                  {/* Optionnel: Afficher un bouton Login en haut à droite si user est null, sinon logout */}
+                  {user && (
+                    <button 
+                        onClick={handleLogout}
+                        className="absolute right-6 text-xs font-bold text-red-500 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                        Déconnexion
+                    </button>
+                  )}
               </nav>
 
               {/* Hero Section */}
@@ -882,10 +885,14 @@ const App: React.FC = () => {
                       
                       <div className="flex gap-4 pt-4">
                           <button 
-                            onClick={() => setAppMode('portal_dashboard')}
-                            className="bg-black text-white px-8 py-4 rounded-xl font-bold text-lg shadow-xl hover:scale-105 transition-transform flex items-center gap-2"
+                            onClick={user ? () => setAppMode('portal_dashboard') : handleLogin}
+                            className={`px-8 py-4 rounded-xl font-bold text-lg shadow-xl hover:scale-105 transition-transform flex items-center gap-2 ${
+                                user 
+                                ? 'bg-black text-white hover:bg-stone-800' 
+                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                            }`}
                           >
-                              JOUER MAINTENANT <span>➔</span>
+                              {user ? "ACCÉDER AU QG" : "JOUER"} <span>➔</span>
                           </button>
                       </div>
                   </div>
@@ -1017,12 +1024,21 @@ const App: React.FC = () => {
                                               <div className="font-bold text-slate-800 text-sm truncate">{save.country}</div>
                                               <div className="text-xs text-slate-500">Tour {save.turn} • {save.date}</div>
                                           </div>
-                                          <button 
-                                            onClick={(e) => { e.stopPropagation(); loadGameById(save.id); }}
-                                            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-colors shadow-sm"
-                                          >
-                                              Charger
-                                          </button>
+                                          <div className="flex gap-2">
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); loadGameById(save.id); }}
+                                                className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-colors shadow-sm"
+                                            >
+                                                Charger
+                                            </button>
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); deleteSave(save.id); }}
+                                                className="px-3 py-2 bg-white border border-slate-200 text-red-500 text-xs font-bold rounded-lg hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm"
+                                                title="Supprimer"
+                                            >
+                                                🗑
+                                            </button>
+                                          </div>
                                       </div>
                                   ))
                               )}
