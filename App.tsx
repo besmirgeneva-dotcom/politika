@@ -9,7 +9,7 @@ import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
 import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeToAuthChanges, db } from './services/authService';
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, limit } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, limit, onSnapshot, orderBy } from 'firebase/firestore';
 
 const INITIAL_DATE = new Date('2000-01-01');
 
@@ -110,7 +110,7 @@ const App: React.FC = () => {
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(true); // Default to true until listener loads
   const [isGlobalLoading, setIsGlobalLoading] = useState(false); // NEW: Global loading state for heavy ops
 
   // Bug Report State
@@ -182,7 +182,6 @@ const App: React.FC = () => {
         setUser(u);
         if (u) {
             setAppMode('portal_dashboard');
-            refreshSaves(u); // Fetch cloud saves
             setShowLoginModal(false); // Close modal if open
         } else {
             setAppMode('portal_landing');
@@ -196,6 +195,49 @@ const App: React.FC = () => {
         unsubscribe();
     };
   }, []);
+
+  // --- REAL-TIME SAVE LISTENER (The Better Way) ---
+  useEffect(() => {
+      if (!user || !db) {
+          setAvailableSaves([]);
+          setIsSyncing(false);
+          return;
+      }
+
+      setIsSyncing(true);
+
+      // Subscribe to "game_metas" collection
+      // order by lastPlayed descending to show newest first
+      const q = query(
+          collection(db, "users", user.uid, "game_metas"),
+          limit(20) // Only get the last 20 games to keep it fast
+          // Note: ordering might require a compound index in Firestore console if strictly enforced,
+          // but usually works for small collections or we sort client side.
+      );
+
+      const unsubscribe = onSnapshot(q, 
+        (snapshot) => {
+            const saves: SaveMetadata[] = [];
+            snapshot.forEach((doc) => {
+                saves.push(doc.data() as SaveMetadata);
+            });
+            // Sort client-side to ensure order without index errors initially
+            saves.sort((a, b) => b.lastPlayed - a.lastPlayed);
+            
+            if (isMountedRef.current) {
+                setAvailableSaves(saves);
+                setHasSave(saves.length > 0);
+                setIsSyncing(false);
+            }
+        }, 
+        (error) => {
+            console.error("Save listener error:", error);
+            if (isMountedRef.current) setIsSyncing(false);
+        }
+      );
+
+      return () => unsubscribe();
+  }, [user]); // Re-run only if user changes
 
   // Timer for Game Splash
   useEffect(() => {
@@ -219,70 +261,6 @@ const App: React.FC = () => {
 
 
   // --- SAVE SYSTEM LOGIC (CLOUD ONLY) ---
-
-  const refreshSaves = async (currentUser: any) => {
-      if (!isMountedRef.current || !currentUser || !db) return;
-      
-      setIsSyncing(true);
-      setAvailableSaves([]); 
-      
-      // Extended Timeout to 15s to handle slow cold starts
-      const withTimeout = (promise: Promise<any>, ms: number = 15000) => {
-          return Promise.race([
-              promise,
-              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), ms))
-          ]);
-      };
-
-      try {
-          // 1. Try fetch optimized metadata with TIMEOUT
-          const metaSnapshot = await withTimeout(
-              getDocs(collection(db, "users", currentUser.uid, "game_metas"))
-          ) as any;
-          
-          if (isMountedRef.current) {
-              if (!metaSnapshot.empty) {
-                  const cloudSaves = metaSnapshot.docs.map((d: any) => d.data() as SaveMetadata);
-                  cloudSaves.sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
-                  setAvailableSaves(cloudSaves);
-                  setHasSave(cloudSaves.length > 0);
-              } else {
-                  // 2. Fallback: Check legacy 'games' ONLY if metadata is empty.
-                  console.log("No metadata found. Checking legacy...");
-                  const gameSnapshot = await withTimeout(
-                      getDocs(query(collection(db, "users", currentUser.uid, "games"), limit(10)))
-                  ) as any;
-                  
-                  const legacySaves: SaveMetadata[] = [];
-                  const batch = writeBatch(db);
-                  let needsMigration = false;
-
-                  gameSnapshot.forEach((docSnap: any) => {
-                      const data = docSnap.data();
-                      if (data.metadata) {
-                          legacySaves.push(data.metadata);
-                          const metaRef = doc(db, "users", currentUser.uid, "game_metas", docSnap.id);
-                          batch.set(metaRef, data.metadata);
-                          needsMigration = true;
-                      }
-                  });
-
-                  if (needsMigration) {
-                      batch.commit().catch(e => console.warn("Migration background fail", e));
-                  }
-
-                  legacySaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
-                  setAvailableSaves(legacySaves);
-                  setHasSave(legacySaves.length > 0);
-              }
-          }
-      } catch (e) {
-          console.error("Cloud fetch error (or timeout):", e);
-          if (isMountedRef.current) showNotification("Erreur Sync Cloud (Connexion?)");
-      }
-      
-      if (isMountedRef.current) setIsSyncing(false);
-  };
 
   const saveGame = async (state: GameState, history: GameEvent[], showNotif = true) => {
       // CLOUD ONLY - REJECT IF NO USER
@@ -315,13 +293,12 @@ const App: React.FC = () => {
           const metaRef = doc(db, "users", user.uid, "game_metas", state.gameId);
           batch.set(metaRef, metadata);
 
-          // AWAIT COMPLETION before refreshing UI
+          // AWAIT COMPLETION
           await batch.commit();
 
           if (showNotif) showNotification("Sauvegarde Cloud réussie !");
           
-          // Refresh list immediately to reflect changes
-          await refreshSaves(user);
+          // No need to manually refresh, the onSnapshot listener handles it!
       } catch (e) {
           console.error("Cloud save failed", e);
           showNotification("Échec Sauvegarde Cloud");
@@ -336,8 +313,7 @@ const App: React.FC = () => {
           batch.delete(doc(db, "users", user.uid, "games", id));
           batch.delete(doc(db, "users", user.uid, "game_metas", id));
           await batch.commit();
-          
-          refreshSaves(user);
+          // No manual refresh needed
       } catch (e) { console.error("Cloud delete failed", e); }
   };
 
@@ -349,18 +325,15 @@ const App: React.FC = () => {
 
       if (user && db) {
           try {
-              // Timeout fetch to prevent hanging - 15s
-              const fetchPromise = getDoc(doc(db, "users", user.uid, "games", id));
-              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 15000));
-              
-              const docSnap = await Promise.race([fetchPromise, timeoutPromise]) as any;
+              // Standard fetch for the full game data
+              const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
               
               if (docSnap.exists()) {
                   data = docSnap.data();
               }
           } catch (e) {
               console.error("Cloud load error", e);
-              showNotification("Erreur chargement Cloud (Timeout/Réseau)");
+              showNotification("Erreur de chargement (Réseau)");
               setIsGlobalLoading(false);
               return;
           }
@@ -403,7 +376,7 @@ const App: React.FC = () => {
   };
 
   const openLoadMenu = () => {
-      refreshSaves(user);
+      // No need to refresh, data is live
       setIsLoadMenuOpen(true);
   };
 
@@ -420,7 +393,6 @@ const App: React.FC = () => {
       setIsSettingsOpen(false);
       setAppMode('portal_dashboard');
       setIsGlobalLoading(false); 
-      refreshSaves(user);
   };
 
   const handleExitApp = () => {
@@ -1006,7 +978,9 @@ const App: React.FC = () => {
               {/* List */}
               <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
                   {isSyncing && availableSaves.length === 0 ? (
-                      <div className="text-center text-slate-400 py-10 animate-pulse">Sync avec le Cloud...</div>
+                      <div className="text-center text-slate-400 py-10 animate-pulse text-xs">
+                          Synchronisation des données...
+                      </div>
                   ) : availableSaves.length === 0 ? (
                       <div className="text-center text-slate-400 py-10 italic">
                           {user ? "Aucune sauvegarde Cloud trouvée." : "Connectez-vous pour voir vos sauvegardes."}
@@ -1298,12 +1272,12 @@ const App: React.FC = () => {
                                   <span>💾</span> Sauvegardes Cloud
                               </h3>
                               <span className="text-xs text-slate-400 font-mono">
-                                {isSyncing ? "Sync..." : `${availableSaves.length} fichiers`}
+                                {isSyncing ? "Live Sync..." : `${availableSaves.length} fichiers`}
                               </span>
                           </div>
                           
                           <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                              {isSyncing ? (
+                              {isSyncing && availableSaves.length === 0 ? (
                                   <div className="h-full flex items-center justify-center text-slate-400 animate-pulse text-xs">
                                       Chargement des données...
                                   </div>
