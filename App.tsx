@@ -9,7 +9,7 @@ import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
 import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeToAuthChanges, db } from './services/authService';
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc } from 'firebase/firestore';
 
 const INITIAL_DATE = new Date('2000-01-01');
 const SAVES_INDEX_KEY = 'GEOSIM_SAVES_INDEX'; // Stores list of metadata (Local Only)
@@ -113,6 +113,13 @@ const App: React.FC = () => {
   const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false); // NEW: Global loading state for heavy ops
+
+  // Bug Report State
+  const [showBugReportModal, setShowBugReportModal] = useState(false);
+  const [bugTitle, setBugTitle] = useState("");
+  const [bugDescription, setBugDescription] = useState("");
+  const [isSendingBug, setIsSendingBug] = useState(false);
 
   // Auth State
   const [user, setUser] = useState<any>(null);
@@ -351,6 +358,9 @@ const App: React.FC = () => {
   };
 
   const loadGameById = async (id: string) => {
+      if (isGlobalLoading) return; // Prevent double clicks
+      
+      setIsGlobalLoading(true); // START LOADING VISUAL
       let data: any = null;
 
       if (user && db) {
@@ -363,6 +373,7 @@ const App: React.FC = () => {
           } catch (e) {
               console.error("Cloud load error", e);
               showNotification("Erreur chargement Cloud");
+              setIsGlobalLoading(false); // STOP LOADING
               return;
           }
       } else {
@@ -387,11 +398,16 @@ const App: React.FC = () => {
               // Launch Game
               setAppMode('game_active');
               startLoadingSequence();
+              // Note: isGlobalLoading reset is not strictly needed here as screen changes, but good practice
+              setIsGlobalLoading(false); 
               showNotification(`Partie chargée: ${data.state.playerCountry}`);
           } catch (e) {
               console.error("Save corrupted", e);
               showNotification("Erreur de sauvegarde (Corrompue)");
+              setIsGlobalLoading(false);
           }
+      } else {
+          setIsGlobalLoading(false); // Data not found
       }
 
       setIsSettingsOpen(false);
@@ -423,6 +439,7 @@ const App: React.FC = () => {
   const handleExitToDashboard = () => {
       setIsSettingsOpen(false);
       setAppMode('portal_dashboard');
+      setIsGlobalLoading(false); // Ensure loading is off when returning
       // Refresh saves when returning to dashboard to ensure latest info
       refreshSaves(user);
   };
@@ -471,6 +488,38 @@ const App: React.FC = () => {
   const handleLogin = () => {
       setAppMode('portal_landing');
       setShowLoginModal(true);
+  };
+
+  // --- BUG REPORTING ---
+  const handleSendBugReport = async () => {
+      if (!bugTitle.trim() || !bugDescription.trim()) {
+          showNotification("Veuillez remplir tous les champs.");
+          return;
+      }
+
+      setIsSendingBug(true);
+      try {
+          if (db) {
+              await addDoc(collection(db, "bug_reports"), {
+                  title: bugTitle,
+                  description: bugDescription,
+                  userEmail: user?.email || "anonymous",
+                  userId: user?.uid || "unknown",
+                  timestamp: Date.now(),
+                  status: 'new'
+              });
+              showNotification("Nous vous remercions pour votre signalement");
+          } else {
+              showNotification("Erreur: Service indisponible");
+          }
+      } catch (e) {
+          console.error("Failed to send report", e);
+          showNotification("Échec de l'envoi du rapport.");
+      }
+      setIsSendingBug(false);
+      setShowBugReportModal(false);
+      setBugTitle("");
+      setBugDescription("");
   };
 
   // Launch New Game from Dashboard
@@ -1157,7 +1206,19 @@ const App: React.FC = () => {
   // =========================================================
   if (appMode === 'portal_dashboard') {
       return (
-          <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+          <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
+              
+              {/* GLOBAL LOADING OVERLAY FOR DASHBOARD */}
+              {isGlobalLoading && (
+                  <div className="fixed inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
+                      <GameLogo size="small" theme="light" />
+                      <div className="mt-6 text-emerald-600 font-bold text-lg animate-pulse tracking-widest uppercase">
+                          Chargement des données...
+                      </div>
+                      <p className="text-xs text-slate-400 mt-2">Récupération depuis le Cloud sécurisé</p>
+                  </div>
+              )}
+
               {/* Header */}
               <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center sticky top-0 z-20">
                   <div className="flex items-center gap-2">
@@ -1167,6 +1228,13 @@ const App: React.FC = () => {
                   
                   {user ? (
                       <div className="flex items-center gap-4">
+                          <button 
+                            onClick={() => setShowBugReportModal(true)}
+                            className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 transition-colors mr-2 hidden md:block"
+                          >
+                              🐞 Signaler bug
+                          </button>
+
                           <div className="text-right hidden md:block">
                               <div className="text-sm font-bold">{user.displayName || user.email}</div>
                               <div className="text-[10px] text-slate-500 uppercase">Connecté</div>
@@ -1279,6 +1347,64 @@ const App: React.FC = () => {
 
                   </div>
               </main>
+
+              {/* BUG REPORT MODAL */}
+              {showBugReportModal && (
+                  <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-slate-200 animate-fade-in-up">
+                          <div className="flex justify-between items-center mb-4">
+                              <h3 className="text-xl font-bold text-red-600 flex items-center gap-2">
+                                  <span>🐞</span> Signaler un bug
+                              </h3>
+                              <button 
+                                onClick={() => setShowBugReportModal(false)}
+                                className="text-slate-400 hover:text-slate-600 font-bold"
+                              >
+                                  ✕
+                              </button>
+                          </div>
+                          
+                          <div className="space-y-4">
+                              <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Titre du problème</label>
+                                  <input 
+                                    type="text"
+                                    className="w-full p-2 rounded-lg border border-slate-300 focus:outline-red-500 bg-slate-50 text-sm"
+                                    placeholder="Ex: Le jeu bloque au tour 5"
+                                    value={bugTitle}
+                                    onChange={(e) => setBugTitle(e.target.value)}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Description détaillée</label>
+                                  <textarea 
+                                    className="w-full p-2 rounded-lg border border-slate-300 focus:outline-red-500 bg-slate-50 text-sm h-32 resize-none"
+                                    placeholder="Décrivez ce qui s'est passé..."
+                                    value={bugDescription}
+                                    onChange={(e) => setBugDescription(e.target.value)}
+                                  />
+                              </div>
+                              
+                              <button 
+                                onClick={handleSendBugReport}
+                                disabled={isSendingBug}
+                                className={`w-full py-3 rounded-lg font-bold text-white shadow-md transition-colors ${
+                                    isSendingBug ? 'bg-slate-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'
+                                }`}
+                              >
+                                  {isSendingBug ? 'Envoi...' : 'Envoyer le rapport'}
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+
+              {/* NOTIFICATION OVERLAY FOR DASHBOARD (reusing the existing one but ensuring it renders here too) */}
+              {notification && (
+                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2">
+                    <span className="text-emerald-400">✓</span> {notification}
+                </div>
+              )}
           </div>
       );
   }
