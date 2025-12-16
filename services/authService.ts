@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // --- CONFIGURATION FIREBASE ---
@@ -40,6 +40,16 @@ export const loginWithGoogle = async () => {
     }
     const provider = new GoogleAuthProvider();
     return signInWithPopup(auth, provider);
+};
+
+export const loginWithEmail = async (email: string, pass: string) => {
+    if (!auth) throw new Error("Firebase non configuré.");
+    return signInWithEmailAndPassword(auth, email, pass);
+};
+
+export const registerWithEmail = async (email: string, pass: string) => {
+    if (!auth) throw new Error("Firebase non configuré.");
+    return createUserWithEmailAndPassword(auth, email, pass);
 };
 
 export const logout = async () => {

@@ -8,8 +8,8 @@ import DateControls from './components/DateControls';
 import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType } from './types';
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
-import { loginWithGoogle, logout, subscribeToAuthChanges, db } from './services/authService';
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
+import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeToAuthChanges, db } from './services/authService';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
 
 const INITIAL_DATE = new Date('2000-01-01');
 const SAVES_INDEX_KEY = 'GEOSIM_SAVES_INDEX'; // Stores list of metadata (Local Only)
@@ -117,6 +117,12 @@ const App: React.FC = () => {
   // Auth State
   const [user, setUser] = useState<any>(null);
   
+  // --- LOGIN MODAL STATE ---
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
+  
   // Game State
   const [gameState, setGameState] = useState<GameState>({
     gameId: '', // Initialize empty
@@ -166,6 +172,7 @@ const App: React.FC = () => {
         if (u) {
             setAppMode('portal_dashboard');
             refreshSaves(u); // Fetch cloud saves
+            setShowLoginModal(false); // Close modal if open
         } else {
             setAppMode('portal_landing');
             refreshSaves(null); // Fetch local saves
@@ -204,20 +211,50 @@ const App: React.FC = () => {
       setIsSyncing(true);
       
       if (currentUser && db) {
-          // CLOUD MODE
+          // CLOUD MODE - OPTIMIZED WITH DEDICATED META COLLECTION
           try {
-              const querySnapshot = await getDocs(collection(db, "users", currentUser.uid, "games"));
-              const cloudSaves: SaveMetadata[] = [];
-              querySnapshot.forEach((doc) => {
-                  const data = doc.data();
-                  if (data.metadata) cloudSaves.push(data.metadata);
-              });
-              cloudSaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
-              setAvailableSaves(cloudSaves);
-              setHasSave(cloudSaves.length > 0);
+              // 1. Try to fetch from the optimized metadata collection (Lightweight)
+              const metaSnapshot = await getDocs(collection(db, "users", currentUser.uid, "game_metas"));
+              
+              if (!metaSnapshot.empty) {
+                  const cloudSaves = metaSnapshot.docs.map(d => d.data() as SaveMetadata);
+                  cloudSaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
+                  setAvailableSaves(cloudSaves);
+                  setHasSave(cloudSaves.length > 0);
+              } else {
+                  // 2. Fallback: If empty, it might be an old account. Fetch from 'games' (Heavy) and migrate.
+                  console.log("No optimized saves found. Checking legacy saves...");
+                  const gameSnapshot = await getDocs(collection(db, "users", currentUser.uid, "games"));
+                  const legacySaves: SaveMetadata[] = [];
+                  
+                  // Migration Batch
+                  const batch = writeBatch(db);
+                  let needsMigration = false;
+
+                  gameSnapshot.forEach((docSnap) => {
+                      const data = docSnap.data();
+                      if (data.metadata) {
+                          legacySaves.push(data.metadata);
+                          
+                          // Prepare migration to optimized collection
+                          const metaRef = doc(db, "users", currentUser.uid, "game_metas", docSnap.id);
+                          batch.set(metaRef, data.metadata);
+                          needsMigration = true;
+                      }
+                  });
+
+                  if (needsMigration) {
+                      await batch.commit();
+                      console.log("Migration terminée : Index de sauvegardes créé.");
+                  }
+
+                  legacySaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
+                  setAvailableSaves(legacySaves);
+                  setHasSave(legacySaves.length > 0);
+              }
+
           } catch (e) {
               console.error("Cloud fetch error:", e);
-              // Fallback to empty if error, or show notification
           }
       } else {
           // LOCAL MODE
@@ -245,14 +282,26 @@ const App: React.FC = () => {
       };
       
       const fullData = { metadata, state, history, aiProvider };
-      // Sanitize: removes 'undefined' fields (Firestore rejects them) and converts Dates to strings
+      // Sanitize: removes 'undefined' fields and converts Dates to strings
       const sanitizedData = JSON.parse(JSON.stringify(fullData));
 
       if (user && db) {
-          // SAVE TO CLOUD
+          // SAVE TO CLOUD (OPTIMIZED: Data + Metadata separately)
           try {
-             await setDoc(doc(db, "users", user.uid, "games", state.gameId), sanitizedData);
-             if (showNotif) showNotification("Partie sauvegardée (Cloud)");
+             const batch = writeBatch(db);
+             
+             // 1. Save Full Data (Heavy)
+             const gameRef = doc(db, "users", user.uid, "games", state.gameId);
+             batch.set(gameRef, sanitizedData);
+
+             // 2. Save Metadata Index (Light)
+             const metaRef = doc(db, "users", user.uid, "game_metas", state.gameId);
+             batch.set(metaRef, metadata);
+
+             await batch.commit();
+
+             if (showNotif) showNotification("Partie sauvegardée");
+             // Note: We don't await refreshSaves here to keep UI snappy, usually local state is enough context
              refreshSaves(user);
           } catch (e) {
              console.error("Cloud save failed", e);
@@ -278,9 +327,13 @@ const App: React.FC = () => {
 
   const deleteSave = async (id: string) => {
       if (user && db) {
-          // DELETE CLOUD
+          // DELETE CLOUD (Both Data and Meta)
           try {
-              await deleteDoc(doc(db, "users", user.uid, "games", id));
+              const batch = writeBatch(db);
+              batch.delete(doc(db, "users", user.uid, "games", id));
+              batch.delete(doc(db, "users", user.uid, "game_metas", id));
+              await batch.commit();
+              
               refreshSaves(user);
           } catch (e) { console.error("Cloud delete failed", e); }
       } else {
@@ -364,7 +417,7 @@ const App: React.FC = () => {
 
   const showNotification = (msg: string) => {
       setNotification(msg);
-      setTimeout(() => setNotification(null), 3000);
+      setTimeout(() => setNotification(null), 2000); // 2 seconds delay
   }
 
   const handleExitToDashboard = () => {
@@ -380,12 +433,32 @@ const App: React.FC = () => {
       if (typeof navigator.app !== 'undefined' && navigator.app.exitApp) navigator.app.exitApp();
   };
 
-  const handleLogin = async () => {
+  // --- AUTH HANDLERS ---
+  const handleGoogleLogin = async () => {
       try {
           await loginWithGoogle();
-          showNotification("Bienvenue sur Politika.");
+          // Notification handled by auth state change
       } catch (e) {
-          showNotification("Erreur de connexion.");
+          showNotification("Erreur Google Login.");
+      }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+          if (isRegistering) {
+              await registerWithEmail(authEmail, authPassword);
+          } else {
+              await loginWithEmail(authEmail, authPassword);
+          }
+          // Modal closing is handled by the auth state listener
+      } catch (err: any) {
+          console.error(err);
+          let msg = "Erreur d'authentification.";
+          if (err.code === 'auth/invalid-credential') msg = "Email ou mot de passe incorrect.";
+          if (err.code === 'auth/email-already-in-use') msg = "Cet email est déjà utilisé.";
+          if (err.code === 'auth/weak-password') msg = "Le mot de passe est trop faible.";
+          showNotification(msg);
       }
   };
 
@@ -393,6 +466,11 @@ const App: React.FC = () => {
       await logout();
       showNotification("Déconnecté.");
       setAppMode('portal_landing');
+  };
+
+  const handleLogin = () => {
+      setAppMode('portal_landing');
+      setShowLoginModal(true);
   };
 
   // Launch New Game from Dashboard
@@ -959,7 +1037,7 @@ const App: React.FC = () => {
                       
                       <div className="flex gap-4 pt-4">
                           <button 
-                            onClick={user ? () => setAppMode('portal_dashboard') : handleLogin}
+                            onClick={user ? () => setAppMode('portal_dashboard') : () => setShowLoginModal(true)}
                             className={`px-8 py-4 rounded-xl font-bold text-lg shadow-xl hover:scale-105 transition-transform flex items-center gap-2 ${
                                 user 
                                 ? 'bg-black text-white hover:bg-stone-800' 
@@ -998,6 +1076,74 @@ const App: React.FC = () => {
                   </div>
               </main>
 
+              {/* LOGIN MODAL */}
+              {showLoginModal && (
+                  <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-slate-200">
+                          <div className="flex justify-between items-center mb-6">
+                              <h3 className="text-xl font-bold text-slate-800">
+                                  {isRegistering ? "Créer un compte" : "Connexion"}
+                              </h3>
+                              <button onClick={() => setShowLoginModal(false)} className="text-slate-400 hover:text-slate-600 font-bold">✕</button>
+                          </div>
+                          
+                          <form onSubmit={handleEmailAuth} className="space-y-4">
+                              <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email / Nom d'utilisateur</label>
+                                  <input 
+                                    type="email" 
+                                    required
+                                    className="w-full p-3 rounded-lg border border-slate-300 focus:outline-blue-500 bg-slate-50"
+                                    placeholder="exemple@email.com"
+                                    value={authEmail}
+                                    onChange={(e) => setAuthEmail(e.target.value)}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mot de passe</label>
+                                  <input 
+                                    type="password" 
+                                    required
+                                    className="w-full p-3 rounded-lg border border-slate-300 focus:outline-blue-500 bg-slate-50"
+                                    placeholder="••••••••"
+                                    value={authPassword}
+                                    onChange={(e) => setAuthPassword(e.target.value)}
+                                  />
+                              </div>
+                              <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg transition-transform active:scale-95">
+                                  {isRegistering ? "S'inscrire" : "Se connecter"}
+                              </button>
+                          </form>
+
+                          <div className="mt-4 text-center">
+                              <button 
+                                onClick={() => setIsRegistering(!isRegistering)}
+                                className="text-xs text-blue-600 font-bold hover:underline"
+                              >
+                                  {isRegistering ? "Déjà un compte ? Se connecter" : "Pas de compte ? S'inscrire"}
+                              </button>
+                          </div>
+
+                          <div className="relative my-6">
+                              <div className="absolute inset-0 flex items-center">
+                                  <div className="w-full border-t border-slate-200"></div>
+                              </div>
+                              <div className="relative flex justify-center text-xs">
+                                  <span className="px-2 bg-white text-slate-400 font-bold uppercase">Ou se connecter avec</span>
+                              </div>
+                          </div>
+
+                          <button 
+                            onClick={handleGoogleLogin}
+                            className="w-full py-3 bg-white border border-slate-300 text-slate-700 font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+                          >
+                              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+                              Google
+                          </button>
+                      </div>
+                  </div>
+              )}
+
               {/* Footer */}
               <footer className="mt-20 py-10 text-center text-slate-400 text-sm border-t border-slate-100">
                   <p>© 2025 POLITIKA - Powered by Gemini AI</p>
@@ -1022,10 +1168,16 @@ const App: React.FC = () => {
                   {user ? (
                       <div className="flex items-center gap-4">
                           <div className="text-right hidden md:block">
-                              <div className="text-sm font-bold">{user.displayName}</div>
+                              <div className="text-sm font-bold">{user.displayName || user.email}</div>
                               <div className="text-[10px] text-slate-500 uppercase">Connecté</div>
                           </div>
-                          <img src={user.photoURL} className="w-10 h-10 rounded-full border border-slate-200" alt="" />
+                          {user.photoURL ? (
+                              <img src={user.photoURL} className="w-10 h-10 rounded-full border border-slate-200" alt="" />
+                          ) : (
+                              <div className="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold">
+                                  {user.email ? user.email[0].toUpperCase() : 'U'}
+                              </div>
+                          )}
                           <button onClick={handleLogout} className="bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-500 p-2 rounded-lg transition-colors">
                               ✕
                           </button>
@@ -1347,7 +1499,13 @@ const App: React.FC = () => {
                         {/* User Avatar (In Game) */}
                         {user && (
                             <div className="w-9 h-9 rounded-full border-2 border-emerald-500 overflow-hidden shadow-lg" title={user.displayName}>
-                                <img src={user.photoURL} alt="User" className="w-full h-full object-cover" />
+                                {user.photoURL ? (
+                                    <img src={user.photoURL} alt="User" className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="w-full h-full bg-stone-800 text-white flex items-center justify-center font-bold">
+                                        {user.email ? user.email[0].toUpperCase() : 'U'}
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -1474,9 +1632,15 @@ const App: React.FC = () => {
                     
                     {user && (
                         <div className="mb-4 bg-white p-3 rounded-lg flex items-center gap-3 shadow-sm border border-stone-200">
-                            <img src={user.photoURL} alt="" className="w-10 h-10 rounded-full" />
+                            {user.photoURL ? (
+                                <img src={user.photoURL} alt="" className="w-10 h-10 rounded-full" />
+                            ) : (
+                                <div className="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold">
+                                    {user.email ? user.email[0].toUpperCase() : 'U'}
+                                </div>
+                            )}
                             <div className="flex-1">
-                                <div className="text-xs font-bold text-stone-800">{user.displayName}</div>
+                                <div className="text-xs font-bold text-stone-800">{user.displayName || user.email}</div>
                                 <div className="text-[10px] text-stone-500">{user.email}</div>
                             </div>
                             <button onClick={handleLogout} className="text-red-500 font-bold text-xs hover:bg-red-50 p-1 rounded">Sortir</button>
@@ -1527,7 +1691,7 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="pt-4 border-t border-stone-200 flex flex-col gap-2">
-                            <button onClick={() => saveGame(gameState, fullHistory, true)} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow">Sauvegarder la partie</button>
+                            <button onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow">Sauvegarder la partie</button>
                             <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow">Charger une partie</button>
                             <button onClick={() => setIsSettingsOpen(false)} className="w-full py-3 bg-stone-800 text-white font-bold rounded-lg">Reprendre</button>
                             <button onClick={handleExitToDashboard} className="w-full py-3 bg-stone-200 text-stone-600 font-bold rounded-lg">Quitter vers Tableau de bord</button>
