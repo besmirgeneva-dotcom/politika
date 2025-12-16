@@ -8,11 +8,12 @@ import DateControls from './components/DateControls';
 import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType } from './types';
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
-import { loginWithGoogle, logout, subscribeToAuthChanges, isAuthAvailable } from './services/authService';
+import { loginWithGoogle, logout, subscribeToAuthChanges, db } from './services/authService';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 
 const INITIAL_DATE = new Date('2000-01-01');
-const SAVES_INDEX_KEY = 'GEOSIM_SAVES_INDEX'; // Stores list of metadata
-const SAVE_DATA_PREFIX = 'GEOSIM_GAME_';    // Prefix for actual data
+const SAVES_INDEX_KEY = 'GEOSIM_SAVES_INDEX'; // Stores list of metadata (Local Only)
+const SAVE_DATA_PREFIX = 'GEOSIM_GAME_';    // Prefix for actual data (Local Only)
 
 // --- TYPES FOR SAVE SYSTEM ---
 interface SaveMetadata {
@@ -28,7 +29,7 @@ interface SaveMetadata {
 // 'portal_dashboard' : Après connexion (Choix du jeu)
 // 'game_splash' | 'game_loading' | 'game_running' : Le jeu GeoSim original
 type AppMode = 'portal_landing' | 'portal_dashboard' | 'game_active';
-type GameScreen = 'splash' | 'loading' | 'game'; // 'menu' removed
+type GameScreen = 'splash' | 'loading' | 'game';
 
 // Helper to determine initial power & corruption - AN 2000 CONTEXT
 const getInitialStats = (country: string): { power: number, corruption: number } => {
@@ -103,7 +104,7 @@ const App: React.FC = () => {
   
   // --- GAME INTERNAL STATE ---
   const [currentScreen, setCurrentScreen] = useState<GameScreen>('splash');
-  const [hasSave, setHasSave] = useState(false); // Still used to show indicator/button in dashboard if needed
+  const [hasSave, setHasSave] = useState(false); // Used for "Continue" button
   const [notification, setNotification] = useState<string | null>(null);
   
   // Settings & Load Menu State
@@ -111,6 +112,7 @@ const App: React.FC = () => {
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Auth State
   const [user, setUser] = useState<any>(null);
@@ -158,23 +160,15 @@ const App: React.FC = () => {
 
   // --- INIT & SPLASH LOGIC ---
   useEffect(() => {
-    // Check saves
-    const indexStr = localStorage.getItem(SAVES_INDEX_KEY);
-    if (indexStr) {
-        try {
-            const index = JSON.parse(indexStr);
-            setAvailableSaves(index); // Update local list
-            if (Array.isArray(index) && index.length > 0) setHasSave(true);
-        } catch (e) {}
-    }
-
     // Subscribe to Auth
     const unsubscribe = subscribeToAuthChanges((u) => {
         setUser(u);
         if (u) {
             setAppMode('portal_dashboard');
+            refreshSaves(u); // Fetch cloud saves
         } else {
             setAppMode('portal_landing');
+            refreshSaves(null); // Fetch local saves
         }
     });
 
@@ -183,17 +177,17 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Timer for Game Splash (Transition to Loading)
+  // Timer for Game Splash
   useEffect(() => {
       if (appMode === 'game_active' && currentScreen === 'splash') {
         const timer = setTimeout(() => {
-            setCurrentScreen('loading'); // Go directly to loading, skipping menu
+            setCurrentScreen('loading'); 
         }, 2500);
         return () => clearTimeout(timer);
       }
   }, [appMode, currentScreen]);
 
-  // Timer for Game Loading (Transition to Game)
+  // Timer for Game Loading
   useEffect(() => {
       if (appMode === 'game_active' && currentScreen === 'loading') {
         const timer = setTimeout(() => {
@@ -204,25 +198,44 @@ const App: React.FC = () => {
   }, [appMode, currentScreen]);
 
 
-  // --- SAVE SYSTEM LOGIC ---
+  // --- SAVE SYSTEM LOGIC (HYBRID: CLOUD + LOCAL) ---
 
-  const getAllSaves = (): SaveMetadata[] => {
-      const str = localStorage.getItem(SAVES_INDEX_KEY);
-      if (!str) return [];
-      try {
-          return JSON.parse(str).sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
-      } catch (e) { return []; }
+  const refreshSaves = async (currentUser: any) => {
+      setIsSyncing(true);
+      
+      if (currentUser && db) {
+          // CLOUD MODE
+          try {
+              const querySnapshot = await getDocs(collection(db, "users", currentUser.uid, "games"));
+              const cloudSaves: SaveMetadata[] = [];
+              querySnapshot.forEach((doc) => {
+                  const data = doc.data();
+                  if (data.metadata) cloudSaves.push(data.metadata);
+              });
+              cloudSaves.sort((a, b) => b.lastPlayed - a.lastPlayed);
+              setAvailableSaves(cloudSaves);
+              setHasSave(cloudSaves.length > 0);
+          } catch (e) {
+              console.error("Cloud fetch error:", e);
+              // Fallback to empty if error, or show notification
+          }
+      } else {
+          // LOCAL MODE
+          const str = localStorage.getItem(SAVES_INDEX_KEY);
+          if (str) {
+            try {
+                const localSaves = JSON.parse(str).sort((a: SaveMetadata, b: SaveMetadata) => b.lastPlayed - a.lastPlayed);
+                setAvailableSaves(localSaves);
+                setHasSave(localSaves.length > 0);
+            } catch (e) { setAvailableSaves([]); }
+          } else {
+              setAvailableSaves([]);
+          }
+      }
+      setIsSyncing(false);
   };
 
-  const saveGame = (state: GameState, history: GameEvent[], showNotif = true) => {
-      // 1. Save actual Game Data
-      const data = { state, history, aiProvider };
-      localStorage.setItem(`${SAVE_DATA_PREFIX}${state.gameId}`, JSON.stringify(data));
-
-      // 2. Update Index
-      const saves = getAllSaves();
-      const existingIdx = saves.findIndex(s => s.id === state.gameId);
-      
+  const saveGame = async (state: GameState, history: GameEvent[], showNotif = true) => {
       const metadata: SaveMetadata = {
           id: state.gameId,
           country: state.playerCountry || "Inconnu",
@@ -230,38 +243,86 @@ const App: React.FC = () => {
           turn: state.turn,
           lastPlayed: Date.now()
       };
+      
+      const fullData = { metadata, state, history, aiProvider };
 
-      if (existingIdx >= 0) {
-          saves[existingIdx] = metadata;
+      if (user && db) {
+          // SAVE TO CLOUD
+          try {
+             await setDoc(doc(db, "users", user.uid, "games", state.gameId), fullData);
+             if (showNotif) showNotification("Partie sauvegardée (Cloud)");
+             refreshSaves(user);
+          } catch (e) {
+             console.error("Cloud save failed", e);
+             showNotification("Erreur sauvegarde Cloud");
+          }
       } else {
-          saves.push(metadata);
+          // SAVE LOCALLY
+          localStorage.setItem(`${SAVE_DATA_PREFIX}${state.gameId}`, JSON.stringify(fullData));
+          
+          // Update Local Index
+          const str = localStorage.getItem(SAVES_INDEX_KEY);
+          let saves: SaveMetadata[] = str ? JSON.parse(str) : [];
+          const existingIdx = saves.findIndex(s => s.id === state.gameId);
+          if (existingIdx >= 0) saves[existingIdx] = metadata;
+          else saves.push(metadata);
+          
+          localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
+          setAvailableSaves(saves);
+          setHasSave(true);
+          if (showNotif) showNotification("Partie sauvegardée (Local)");
+      }
+  };
+
+  const deleteSave = async (id: string) => {
+      if (user && db) {
+          // DELETE CLOUD
+          try {
+              await deleteDoc(doc(db, "users", user.uid, "games", id));
+              refreshSaves(user);
+          } catch (e) { console.error("Cloud delete failed", e); }
+      } else {
+          // DELETE LOCAL
+          localStorage.removeItem(`${SAVE_DATA_PREFIX}${id}`);
+          const str = localStorage.getItem(SAVES_INDEX_KEY);
+          if (str) {
+            let saves: SaveMetadata[] = JSON.parse(str);
+            saves = saves.filter(s => s.id !== id);
+            localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
+            setAvailableSaves(saves);
+            if (saves.length === 0) setHasSave(false);
+          }
+      }
+  };
+
+  const loadGameById = async (id: string) => {
+      let data: any = null;
+
+      if (user && db) {
+          // LOAD CLOUD
+          try {
+              const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
+              if (docSnap.exists()) {
+                  data = docSnap.data();
+              }
+          } catch (e) {
+              console.error("Cloud load error", e);
+              showNotification("Erreur chargement Cloud");
+              return;
+          }
+      } else {
+          // LOAD LOCAL
+          const dataStr = localStorage.getItem(`${SAVE_DATA_PREFIX}${id}`);
+          if (dataStr) {
+             try { data = JSON.parse(dataStr); } catch (e) {}
+          }
       }
 
-      localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
-      setAvailableSaves(saves); // Update UI list
-      setHasSave(true);
-      if (showNotif) showNotification("Partie sauvegardée");
-  };
-
-  const deleteSave = (id: string) => {
-      localStorage.removeItem(`${SAVE_DATA_PREFIX}${id}`);
-      const saves = getAllSaves().filter(s => s.id !== id);
-      localStorage.setItem(SAVES_INDEX_KEY, JSON.stringify(saves));
-      setAvailableSaves(saves);
-      if (saves.length === 0) setHasSave(false);
-  };
-
-  const startLoadingSequence = () => {
-      setCurrentScreen('loading');
-      // The useEffect will handle the transition to 'game'
-  };
-
-  const loadGameById = (id: string) => {
-      const dataStr = localStorage.getItem(`${SAVE_DATA_PREFIX}${id}`);
-      if (dataStr) {
+      if (data) {
           try {
-              const data = JSON.parse(dataStr);
+              // Date reconstruction
               data.state.currentDate = new Date(data.state.currentDate);
+              
               setGameState(data.state);
               setFullHistory(data.history);
               if (data.aiProvider) setAiProvider(data.aiProvider);
@@ -274,23 +335,29 @@ const App: React.FC = () => {
               showNotification(`Partie chargée: ${data.state.playerCountry}`);
           } catch (e) {
               console.error("Save corrupted", e);
-              showNotification("Erreur de sauvegarde");
+              showNotification("Erreur de sauvegarde (Corrompue)");
           }
       }
+
       setIsSettingsOpen(false);
       setIsLoadMenuOpen(false);
   };
 
   const loadMostRecentGame = () => {
-      const saves = getAllSaves();
-      if (saves.length > 0) {
-          loadGameById(saves[0].id);
+      if (availableSaves.length > 0) {
+          loadGameById(availableSaves[0].id);
       }
   };
 
   const openLoadMenu = () => {
-      setAvailableSaves(getAllSaves());
+      // Refresh happens automatically on auth change, but good to ensure latest
+      refreshSaves(user);
       setIsLoadMenuOpen(true);
+  };
+
+  const startLoadingSequence = () => {
+      setCurrentScreen('loading');
+      // The useEffect will handle the transition to 'game'
   };
 
   const showNotification = (msg: string) => {
@@ -301,6 +368,8 @@ const App: React.FC = () => {
   const handleExitToDashboard = () => {
       setIsSettingsOpen(false);
       setAppMode('portal_dashboard');
+      // Refresh saves when returning to dashboard to ensure latest info
+      refreshSaves(user);
   };
 
   const handleExitApp = () => {
@@ -811,7 +880,9 @@ const App: React.FC = () => {
 
               {/* List */}
               <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
-                  {availableSaves.length === 0 ? (
+                  {isSyncing && availableSaves.length === 0 ? (
+                      <div className="text-center text-slate-400 py-10 animate-pulse">Sync avec le Cloud...</div>
+                  ) : availableSaves.length === 0 ? (
                       <div className="text-center text-slate-400 py-10 italic">Aucune sauvegarde trouvée.</div>
                   ) : (
                       availableSaves.map((save) => (
@@ -1004,13 +1075,19 @@ const App: React.FC = () => {
                       <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm flex flex-col h-80 col-span-1 md:col-span-1 lg:col-span-2">
                           <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                               <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                  <span>💾</span> Sauvegardes Récentes
+                                  <span>💾</span> Sauvegardes {user ? "(Cloud)" : "(Local)"}
                               </h3>
-                              <span className="text-xs text-slate-400 font-mono">{availableSaves.length} fichiers</span>
+                              <span className="text-xs text-slate-400 font-mono">
+                                {isSyncing ? "Sync..." : `${availableSaves.length} fichiers`}
+                              </span>
                           </div>
                           
                           <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                              {availableSaves.length === 0 ? (
+                              {isSyncing ? (
+                                  <div className="h-full flex items-center justify-center text-slate-400 animate-pulse text-xs">
+                                      Chargement des données...
+                                  </div>
+                              ) : availableSaves.length === 0 ? (
                                   <div className="h-full flex flex-col items-center justify-center text-slate-400">
                                       <span className="text-2xl opacity-30 mb-2">📂</span>
                                       <p className="text-sm">Aucune partie sauvegardée.</p>

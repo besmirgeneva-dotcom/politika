@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 // --- CONFIGURATION FIREBASE ---
 const firebaseConfig = {
@@ -15,12 +16,14 @@ const firebaseConfig = {
 const isConfigValid = !!firebaseConfig.apiKey && !!firebaseConfig.authDomain;
 
 let auth: any = null;
+let db: any = null;
 
 if (isConfigValid) {
     try {
         const app = initializeApp(firebaseConfig);
         auth = getAuth(app);
-        console.log("Firebase initialisé avec succès.");
+        db = getFirestore(app);
+        console.log("Firebase (Auth & Firestore) initialisé avec succès.");
     } catch (e) {
         console.error("Erreur critique initialisation Firebase:", e);
     }
@@ -51,3 +54,5 @@ export const subscribeToAuthChanges = (callback: (user: any) => void) => {
     }
     return onAuthStateChanged(auth, callback);
 };
+
+export { auth, db };
