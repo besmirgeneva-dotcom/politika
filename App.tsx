@@ -530,12 +530,16 @@ const App: React.FC = () => {
                     if (hasNuclearArsenal(target)) newHasNuclear = true;
                 }
             }
-            if (['build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'].includes(update.type)) {
+            // GESTION DES NOUVEAUX TYPES D'ENTITÉS
+            if (['build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'build_base', 'troop_deployment'].includes(update.type)) {
                 let mType: MapEntityType = 'factory';
                 if (update.type === 'build_port') mType = 'port';
                 if (update.type === 'build_airport') mType = 'military_airport';
                 if (update.type === 'build_airbase') mType = 'airbase';
                 if (update.type === 'build_defense') mType = 'defense';
+                if (update.type === 'build_base') mType = 'military_base';
+                if (update.type === 'troop_deployment') mType = 'troops';
+
                 newEntities.push({
                     id: `ent-${Date.now()}-${Math.random()}`, type: mType, country: update.targetCountry,
                     lat: update.lat || 0, lng: update.lng || 0, label: update.label

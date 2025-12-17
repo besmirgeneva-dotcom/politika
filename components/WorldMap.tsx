@@ -51,13 +51,13 @@ const createGroupedIcon = (color: string, labelHtml: string, showLabel: boolean,
   iconAnchor: [0, 0]
 });
 
-const getEntityLabel = (type: string) => {
+const getEntityLabel = (type: string, customLabel?: string) => {
+    if (customLabel) return customLabel;
     switch(type) {
-        case 'factory': return 'Usine';
-        case 'port': return 'Port';
-        case 'military_airport': return 'Aéroport';
+        case 'military_base': return 'Base Militaire';
         case 'airbase': return 'Base Aérienne';
         case 'defense': return 'Défense';
+        case 'troops': return 'Contingent';
         default: return type;
     }
 }
@@ -65,11 +65,10 @@ const getEntityLabel = (type: string) => {
 // Color mapping for entity types
 const getEntityColor = (type: string) => {
     switch(type) {
-        case 'factory': return '#f59e0b'; // Amber (Usine)
-        case 'port': return '#0ea5e9'; // Sky Blue (Port)
-        case 'military_airport': return '#6366f1'; // Indigo (Aéroport Mil)
-        case 'airbase': return '#dc2626'; // Red (Base Aérienne)
-        case 'defense': return '#10b981'; // Emerald (Défense)
+        case 'military_base': return '#ef4444'; // Red (Base)
+        case 'airbase': return '#3b82f6'; // Blue (Air)
+        case 'defense': return '#10b981'; // Green (Defense)
+        case 'troops': return '#f59e0b'; // Amber (Troops)
         default: return '#64748b';
     }
 };
@@ -410,7 +409,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     };
   };
 
-  const showMarkerLabels = zoom > 5;
+  // Affichage des étiquettes des marqueurs (points) uniquement au zoom max (8)
+  const showMarkerLabels = zoom >= 8;
 
   // --- LOGIC: GROUP ENTITIES BY POSITION ---
   const groupedEntities = useMemo(() => {
@@ -430,7 +430,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     };
 
     mapEntities
-        .filter(entity => ['port', 'military_airport', 'airbase', 'defense', 'factory'].includes(entity.type))
+        // FILTRAGE STRICT : SEULS CES TYPES APPARAISSENT SUR LA CARTE
+        .filter(entity => ['military_base', 'airbase', 'defense', 'troops'].includes(entity.type))
         .forEach(entity => {
             const pos = getEntityPosition(entity);
             const key = `${pos[0].toFixed(3)},${pos[1].toFixed(3)}`; // Tolerance for grouping
@@ -457,7 +458,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
 
         <MapLabels zoom={zoom} visibleCountries={centers} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
 
-        {groupedEntities.map((group, idx) => {
+        {zoom >= 8 && groupedEntities.map((group, idx) => {
             const count = group.entities.length;
             const primaryEntity = group.entities[0];
             const color = getEntityColor(primaryEntity.type); // Color of the first, or logic for mixed
@@ -465,13 +466,13 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
             // Generate HTML for label
             let labelHtml = "";
             if (count === 1) {
-                labelHtml = primaryEntity.label || getEntityLabel(primaryEntity.type);
+                labelHtml = getEntityLabel(primaryEntity.type, primaryEntity.label);
             } else {
                 // List view
                 labelHtml = group.entities.map(e => `
                     <div style="display: flex; align-items: center; gap: 3px;">
                         <span style="width: 4px; height: 4px; background-color: ${getEntityColor(e.type)}; border-radius: 50%; flex-shrink: 0;"></span>
-                        <span>${e.label || getEntityLabel(e.type)}</span>
+                        <span>${getEntityLabel(e.type, e.label)}</span>
                     </div>
                 `).join('');
             }
@@ -487,7 +488,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
                                 {group.entities.map((e, i) => (
                                     <div key={i} className="text-xs flex items-center gap-2 mb-0.5">
                                         <span style={{width: 6, height: 6, borderRadius: '50%', backgroundColor: getEntityColor(e.type)}}></span>
-                                        <span>{e.label || getEntityLabel(e.type)}</span>
+                                        <span>{getEntityLabel(e.type, e.label)}</span>
                                     </div>
                                 ))}
                             </div>

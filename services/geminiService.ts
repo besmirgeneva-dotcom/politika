@@ -97,20 +97,15 @@ OBJECTIF: Simuler un monde VIVANT, AUTONOME et COHÉRENT.
 RÈGLES D'OR POUR L'IA (CRITIQUE):
 1. **PRIORITÉ ABSOLUE À L'ACTION DU JOUEUR**:
    - Tu DOIS traiter l'ordre du joueur ("playerAction").
-   - Tu DOIS générer un événement de type "player" qui décrit explicitement le résultat de cet ordre (Succès, Échec, Début de construction, etc.).
-   - Si le joueur construit quelque chose (radar, base, usine), tu DOIS générer un "mapUpdate".
+   - Si le joueur construit ou déploie, utilise "mapUpdates".
 
-2. **AUTONOMIE DES PNJs**:
-   - Tu contrôles les 195 autres pays. Ils ont leurs propres intérêts.
-   - ILS N'ATTENDENT PAS LE JOUEUR. Ils signent des traités, déclenchent des guerres et des crises économiques ENTRE EUX.
+2. **GÉOGRAPHIE & DÉPLOIEMENT MILITAIRE (CRITIQUE)**:
+   - **Déploiement Général**: Si le joueur dit "Déployer troupes en Allemagne" (sans ville), utilise 'troop_deployment' avec les coordonnées centrales du pays. Label: "Contingent militaire [PaysJoueur]".
+   - **Déploiement Précis**: Si le joueur dit "Déployer troupes à Berlin" (avec ville), utilise 'troop_deployment' avec les coordonnées PRÉCISES de la ville. Label: "Contingent militaire [PaysJoueur]".
+   - **Bases & Radars**: Pour 'build_base' ou 'build_defense', si le joueur donne un nom (ex: "Radar Zeus"), mets-le dans 'label'. Sinon label par défaut.
 
-3. **LE JOUEUR N'EST PAS DIEU**:
-   - Si le joueur ordonne une action irréaliste (ex: Le Luxembourg annexe la Chine), l'action DOIT ÉCHOUER avec des conséquences désastreuses.
-   - Ne sois pas complaisant. Oppose une résistance diplomatique et militaire logique.
-
-4. **TON ET STYLE**:
-   - Style journalistique ou dépêche diplomatique. Précis, froid, impactant.
-   - Utilise les noms français exacts des pays.
+3. **FRONTIÈRES**:
+   - Si le joueur vise une frontière (ex: Frontière Albanie-Kosovo), place le point exactement sur la ligne.
 
 Format de réponse attendu : JSON UNIQUEMENT.
 `;
@@ -143,7 +138,7 @@ const RESPONSE_SCHEMA_JSON = {
         items: {
             type: "object",
             properties: {
-                type: { type: "string", enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'] },
+                type: { type: "string", enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'build_base', 'troop_deployment'] },
                 targetCountry: { type: "string" },
                 newOwner: { type: "string" },
                 lat: { type: "number" },
@@ -300,7 +295,7 @@ export const simulateTurn = async (
     1. **OBLIGATOIRE: Juger l'action du joueur**:
        - Tu DOIS inclure un événement de type "player" en première position.
        - Cet événement doit décrire le résultat de l'ordre "${playerAction}".
-       - Si le joueur veut construire quelque chose (ex: Radar, Base), tu DOIS ajouter un élément dans "mapUpdates" avec type 'build_defense', 'build_airbase', etc. et le label approprié.
+       - Si le joueur construit ou déploie des troupes, tu DOIS ajouter un élément dans "mapUpdates".
     
     2. **Simuler le Reste du Monde**: Génère ensuite des événements qui n'impliquent PAS le joueur.
     3. **Définir le Temps**: Choisis 'day' si urgence/guerre, 'month' si tensions, 'year' si calme.
@@ -359,7 +354,7 @@ export const simulateTurn = async (
           items: {
               type: Type.OBJECT,
               properties: {
-                  type: { type: Type.STRING, enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'] },
+                  type: { type: Type.STRING, enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'build_base', 'troop_deployment'] },
                   targetCountry: { type: Type.STRING },
                   newOwner: { type: Type.STRING },
                   lat: { type: Type.NUMBER },
