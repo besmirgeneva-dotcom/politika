@@ -108,6 +108,13 @@ Ton but est de générer une simulation RÉALISTE, IMPRÉVISIBLE et COHÉRENTE a
 - Messages brefs.
 - Noms français exacts.
 
+### 4. ANNEXION DIPLOMATIQUE (IMPORTANT)
+- Si le joueur demande gentiment d'annexer un pays (via ordre ou chat) et que les relations sont neutres ou amicales :
+  - **NE REFUSE PAS CATÉGORIQUEMENT**.
+  - Montre de l'intérêt mais avec des CONDITIONS.
+  - Exemples : "Nous acceptons une union si vous investissez...", "Oui, mais en gardant notre autonomie locale", "Seulement si vous nous protégez de [Ennemi]".
+  - Si le joueur est très puissant et menaçant, les petits pays peuvent se soumettre par peur ("Nous acceptons pour éviter la guerre").
+
 Format réponse : JSON uniquement.
 `;
 
@@ -253,6 +260,7 @@ export const simulateTurn = async (
     2. Simule le tour avec réalisme (conséquences annexion).
     3. Gère stats (Tension, Eco, Pop, Corruption).
     4. Messages diplo si nécessaire.
+    5. Si le joueur demande une annexion pacifique : Analyse la puissance et les relations. Si favorable, accepte l'annexion ('mapUpdates') avec un message de soumission ou de conditions.
   `;
 
   // Gemini Schema
@@ -369,7 +377,14 @@ export const sendDiplomaticMessage = async (
     Interlocuteur : ${playerCountry}.
     Contexte : ${conversationContext}
     Message Joueur : "${message}"
-    Réponds de manière réaliste (Realpolitik). Si non concerné: "NO_RESPONSE".
+    Réponds de manière réaliste (Realpolitik). 
+    Si non concerné: "NO_RESPONSE".
+    
+    RÈGLE ANNEXION : 
+    - Si le joueur demande une annexion et que vous êtes AMIS ou qu'il fait PEUR : NE REFUSE PAS DIRECTEMENT.
+    - Propose des conditions : "Oui, si vous nous donnez 1 milliard", "D'accord, mais en tant qu'état autonome", "Seulement si vous nous protégez".
+    - Si refus nécessaire : "Jamais ! Nous défendrons notre souveraineté."
+
     Une seule phrase.
     `;
 

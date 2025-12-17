@@ -98,6 +98,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [chatHistory, activeParticipants, viewMode, typingParticipants]);
 
+  // NEW: Auto-mark read when chat history updates while viewing a chat
+  useEffect(() => {
+    if (viewMode === 'chat' && activeParticipants.length > 0 && onMarkRead) {
+         // Check if there are unread messages for this chat
+         const hasUnread = chatHistory.some(m => 
+            !m.isRead && 
+            m.sender !== 'player' && 
+            activeParticipants.includes(m.senderName)
+         );
+         if (hasUnread) {
+             onMarkRead(activeParticipants);
+         }
+    }
+  }, [chatHistory, viewMode, activeParticipants, onMarkRead]);
+
   // Reset view when closed
   useEffect(() => {
       if (!isOpen) {
