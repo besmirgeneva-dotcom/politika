@@ -2,11 +2,9 @@ import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel } from "../types";
 
 // --- CONFIGURATION ---
-// The API key must be obtained exclusively from the environment variable process.env.API_KEY.
-// Sur Vercel/Vite, nous exposons ces variables via la config vite.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Utilisation des variables d'environnement UNIQUEMENT. Pas de clé en dur.
+// Utilisation des variables d'environnement UNIQUEMENT.
 const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || "";
 
 export type AIProvider = 'gemini' | 'groq';
@@ -19,11 +17,10 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
         let isRateLimit = false;
         let isServerOverload = false;
         
-        // Analyze error object or message
-        const errString = JSON.stringify(error); // Catch objects like { error: { code: 429 } }
+        const errString = JSON.stringify(error);
         const errMsg = error?.message || "";
         
-        // Check for 429 / Quota / Resource Exhausted
+        // Check for 429
         if (
             error?.status === 429 || 
             error?.code === 429 ||
@@ -35,23 +32,59 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
             isRateLimit = true;
         }
 
-        // Check for 503 / Overloaded
+        // Check for 503
         if (
             error?.status === 503 || 
             error?.code === 503 ||
             errString.includes("503") || 
             errMsg.includes("503") || 
-            errMsg.toLowerCase().includes("overloaded")
+            errMsg.toLowerCase().includes("overloaded") ||
+            errMsg.toLowerCase().includes("unavailable")
         ) {
             isServerOverload = true;
         }
 
         if (retries > 0 && (isRateLimit || isServerOverload)) {
-            console.warn(`Gemini API Busy/Quota. Retrying in ${delay}ms... (${retries} attempts left)`);
-            await new Promise(r => setTimeout(r, delay));
+            console.warn(`Gemini API Busy/Overloaded. Retrying in ${delay}ms... (${retries} attempts left)`);
+            // Add jitter
+            const jitter = Math.random() * 500;
+            await new Promise(r => setTimeout(r, delay + jitter));
             return withRetry(fn, retries - 1, delay * 2);
         }
         throw error;
+    }
+};
+
+// --- HELPER: ROBUST GENERATION WITH MODEL FALLBACK ---
+const generateRobustContent = async (
+    prompt: string, 
+    config: any
+): Promise<any> => {
+    // 1. Try Primary Model (Flash 2.5)
+    try {
+        return await withRetry(async () => {
+            return await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: prompt,
+                config: config
+            });
+        }, 3, 2000);
+    } catch (error) {
+        console.warn("Primary model (Flash 2.5) failed. Switching to fallback (Flash Lite)...", error);
+        
+        // 2. Try Fallback Model (Flash Lite)
+        try {
+            return await withRetry(async () => {
+                return await ai.models.generateContent({
+                    model: "gemini-2.5-flash-lite-latest",
+                    contents: prompt,
+                    config: config
+                });
+            }, 2, 3000);
+        } catch (fallbackError) {
+            console.error("All models failed.", fallbackError);
+            throw fallbackError;
+        }
     }
 };
 
@@ -60,32 +93,29 @@ const SYSTEM_INSTRUCTION = `
 Tu es le "Game Master" d'un jeu de stratégie géopolitique (GeoSim).
 Ton but est de générer une simulation RÉALISTE, IMPRÉVISIBLE et COHÉRENTE avec l'année 2000.
 
-### 1. PHILOSOPHIE "REALPOLITIK" (L'ANNEXION ET SES COÛTS)
-- **LOI DU PLUS FORT** : Si le joueur (ex: USA/Chine) envahit un petit pays isolé (ex: Panama/Tibet) sans alliés majeurs, l'annexion militaire RÉUSSIT (mapUpdates). Ne sois pas artificiellement bloquant.
-- **LE PRIX DU SANG** : Une annexion réussie n'est jamais gratuite.
-  - **International** : Condamnations ONU, Sanctions, Tension mondiale en hausse (+10 à +30).
-  - **Interne** : Baisse de Popularité (guerre d'agression) et hausse de la Corruption (coût de l'occupation).
-  - **Local** : Mouvements de RÉSISTANCE, guérilla ou manifestations dans le pays annexé.
-- **GUERRE SYMÉTRIQUE** : Si les forces sont équilibrées (ex: Inde vs Pakistan), l'annexion est impossible en un tour. C'est une guerre d'usure.
+### 1. PHILOSOPHIE "REALPOLITIK"
+- **LOI DU PLUS FORT** : Si le joueur envahit un petit pays isolé sans alliés, l'annexion RÉUSSIT.
+- **LE PRIX DU SANG** : Une annexion réussie augmente la Tension, baisse la Popularité, et augmente la Corruption.
+- **GUERRE SYMÉTRIQUE** : Guerre d'usure si forces équilibrées.
 
-### 2. GESTION DU TEMPS (AUTO)
-- **'day'** : Guerre active, crise majeure.
-- **'month'** : Tensions diplomatiques, gestion.
-- **'year'** : Période de paix et développement.
+### 2. GESTION DU TEMPS
+- 'day' : Guerre active.
+- 'month' : Tensions.
+- 'year' : Paix.
 
-### 3. DIPLOMATIE & MESSAGES
-- L'IA doit réagir aux actes du joueur. Si le joueur annexe, les voisins ont peur et créent des alliances.
-- Messages ("incomingMessages") : Sois bref. Le ton dépend des relations (Froid, Menaçant, ou Coopératif).
-- **NOMMAGE** : Utilise les noms FRANÇAIS EXACTS (ex: "États-Unis", "Royaume-Uni").
+### 3. DIPLOMATIE
+- Réactions logiques aux actes du joueur.
+- Messages brefs.
+- Noms français exacts.
 
-Format réponse : JSON uniquement, FRANÇAIS.
+Format réponse : JSON uniquement.
 `;
 
 // Schema definition for Groq (JSON)
 const RESPONSE_SCHEMA_JSON = {
     type: "object",
     properties: {
-      timeIncrement: { type: "string", enum: ["day", "month", "year"], description: "Décision temporelle de l'IA" },
+      timeIncrement: { type: "string", enum: ["day", "month", "year"] },
       events: {
         type: "array",
         items: {
@@ -104,7 +134,7 @@ const RESPONSE_SCHEMA_JSON = {
       militaryPowerChange: { type: "integer" },
       popularityChange: { type: "integer" },
       corruptionChange: { type: "integer" },
-      spaceProgramActive: { type: "boolean", description: "Vrai si le joueur acquiert la capacité spatiale ce tour" },
+      spaceProgramActive: { type: "boolean" },
       mapUpdates: {
         type: "array",
         items: {
@@ -112,7 +142,7 @@ const RESPONSE_SCHEMA_JSON = {
             properties: {
                 type: { type: "string", enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'] },
                 targetCountry: { type: "string" },
-                newOwner: { type: "string", description: "Nouveau propriétaire ou 'INDEPENDENT'" },
+                newOwner: { type: "string" },
                 lat: { type: "number" },
                 lng: { type: "number" },
                 label: { type: "string" }
@@ -151,7 +181,7 @@ const RESPONSE_SCHEMA_JSON = {
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
     try {
         if (!GROQ_API_KEY) {
-            throw new Error("Clé API Groq manquante. Configurez VITE_GROQ_API_KEY sur Netlify/Vercel.");
+            throw new Error("Clé API Groq manquante.");
         }
 
         let systemContent = system;
@@ -172,7 +202,7 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
                     { role: "user", content: prompt }
                 ],
                 model: "llama-3.3-70b-versatile",
-                temperature: 0.7, // Légère augmentation pour la créativité
+                temperature: 0.7,
                 response_format: jsonMode ? { type: "json_object" } : undefined
             })
         });
@@ -204,42 +234,28 @@ export const simulateTurn = async (
   const infrastructureContext = existingEntities.length > 0 ? existingEntities.join('\n- ') : "Aucune infrastructure majeure.";
 
   let chaosInstruction = "";
-  if (chaosLevel === 'peaceful') chaosInstruction = "MODE PACIFIQUE: Diplomatie et commerce prioritaires. Guerre interdite.";
+  if (chaosLevel === 'peaceful') chaosInstruction = "MODE PACIFIQUE: Guerre interdite.";
   if (chaosLevel === 'normal') chaosInstruction = "MODE STANDARD: Équilibre réaliste.";
-  if (chaosLevel === 'high') chaosInstruction = "MODE HAUTE TENSION: Crises fréquentes, escarmouches.";
-  if (chaosLevel === 'chaos') chaosInstruction = "MODE APOCALYPSE: Guerre totale, effondrement, agressivité maximale.";
+  if (chaosLevel === 'high') chaosInstruction = "MODE HAUTE TENSION: Crises fréquentes.";
+  if (chaosLevel === 'chaos') chaosInstruction = "MODE APOCALYPSE: Guerre totale.";
 
   const prompt = `
     --- ETAT DU MONDE (${currentDate}) ---
     NATION JOUEUR: ${playerCountry}
-    POSSESSIONS ACTUELLES: ${ownedTerritories.join(', ')}
-    
-    [[ CHAOS: ${chaosInstruction} ]]
+    POSSESSIONS: ${ownedTerritories.join(', ')}
+    CHAOS: ${chaosInstruction}
+    ORDRES: "${playerAction || "Gouvernance standard."}"
+    DIPLOMATIE: ${diplomaticContext}
+    HISTORIQUE: ${historyContext}
 
-    [[ INFRASTRUCTURES EXISTANTES ]]
-    - ${infrastructureContext}
-    
-    [[ ORDRES JOUEUR ]]
-    "${playerAction || "Gouvernance standard."}"
-    
-    [[ DIPLOMATIE ]]
-    ${diplomaticContext}
-
-    [[ HISTORIQUE ]]
-    ${historyContext}
-
-    --- TÂCHES ---
-    1. Analyse les ordres du joueur et DÉCIDE du 'timeIncrement' (day, month, year).
-    2. Simule le tour avec réalisme.
-    3. **AGRESSION & ANNEXION** : 
-       - Si le joueur est beaucoup plus puissant que la cible, valide l'annexion ('mapUpdates').
-       - MAIS génère des conséquences : Tension ++, Résistance locale, Blâme international.
-       - Si le joueur attaque un égal ou un allié protégé, refuse l'annexion immédiate et lance une guerre.
-    4. Gère la corruption et l'économie logiquement.
-    5. Messages diplomatiques uniquement si nécessaire.
+    TÂCHES:
+    1. Analyse les ordres et DÉCIDE du 'timeIncrement'.
+    2. Simule le tour avec réalisme (conséquences annexion).
+    3. Gère stats (Tension, Eco, Pop, Corruption).
+    4. Messages diplo si nécessaire.
   `;
 
-  // Define Schema for Gemini
+  // Gemini Schema
   const geminiSchema: Schema = {
       type: Type.OBJECT,
       properties: {
@@ -270,7 +286,7 @@ export const simulateTurn = async (
               properties: {
                   type: { type: Type.STRING, enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'] },
                   targetCountry: { type: Type.STRING },
-                  newOwner: { type: Type.STRING, description: "Nouveau propriétaire ou 'INDEPENDENT'" },
+                  newOwner: { type: Type.STRING },
                   lat: { type: Type.NUMBER },
                   lng: { type: Type.NUMBER },
                   label: { type: Type.STRING }
@@ -305,45 +321,27 @@ export const simulateTurn = async (
       required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
   };
 
-  const executeGemini = async () => {
-    return withRetry(async () => {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                systemInstruction: SYSTEM_INSTRUCTION,
-                responseMimeType: "application/json",
-                responseSchema: geminiSchema,
-                temperature: chaosLevel === 'chaos' ? 0.9 : 0.7, 
-            },
-        });
-
-        const text = response.text;
-        if (!text) throw new Error("No AI response");
-        return JSON.parse(text) as SimulationResponse;
-    });
-  };
-
-  // EXECUTION LOGIC WITH FALLBACK
-  // Prioritize checking if GROQ key is missing before trying to call it
   if (provider === 'groq') {
-      if (!GROQ_API_KEY) {
-          // Silent fallback to Gemini to avoid noisy errors for users without Groq
-          // console.warn("Groq API key not found. Automatically switching to Gemini.");
-      } else {
+      if (GROQ_API_KEY) {
           try {
               const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, RESPONSE_SCHEMA_JSON);
               return JSON.parse(jsonStr) as SimulationResponse;
           } catch (error) {
-              console.warn("Groq execution failed, falling back to Gemini.", error);
-              // Fall through to Gemini
+              console.warn("Groq failed, fallback to Gemini.", error);
           }
       }
   } 
   
-  // Default to Gemini (or fallback from Groq)
   try {
-      return await executeGemini();
+      const response = await generateRobustContent(prompt, {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: "application/json",
+          responseSchema: geminiSchema,
+          temperature: chaosLevel === 'chaos' ? 0.9 : 0.7,
+      });
+      const text = response.text;
+      if (!text) throw new Error("No AI response");
+      return JSON.parse(text) as SimulationResponse;
   } catch (error) {
       console.error("Gemini Critical Error:", error);
       return getFallbackResponse();
@@ -360,7 +358,6 @@ export const sendDiplomaticMessage = async (
     provider: AIProvider = 'gemini'
 ): Promise<string | null> => {
     
-    // ... (Logique conversationnelle inchangée)
     const conversationContext = history
         .filter(msg => msg.targets.includes(responder) || groupParticipants.includes(msg.senderName))
         .slice(-6)
@@ -372,37 +369,21 @@ export const sendDiplomaticMessage = async (
     Interlocuteur : ${playerCountry}.
     Contexte : ${conversationContext}
     Message Joueur : "${message}"
-    
-    Réponds de manière réaliste (Realpolitik).
-    Si le message ne te concerne pas, réponds "NO_RESPONSE".
+    Réponds de manière réaliste (Realpolitik). Si non concerné: "NO_RESPONSE".
     Une seule phrase.
-    IMPORTANT: Tu réponds SOUS LE NOM EXACT "${responder}". Ne signe pas avec un autre nom (ex: pas de "USA" pour "États-Unis").
     `;
 
-    const executeGemini = async () => {
-        return withRetry(async () => {
-            const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
-            const text = response.text?.trim();
-            return text === "NO_RESPONSE" ? null : text || "Reçu.";
-        });
-    };
-
-    if (provider === 'groq') {
-        if (!GROQ_API_KEY) {
-            // Fallback immediately
-        } else {
-            try {
-                const text = await callGroq(prompt, "Tu es un chef d'état.", false);
-                return text.trim() === "NO_RESPONSE" ? null : text;
-            } catch (e) { 
-                console.warn("Groq failed, fallback to Gemini for chat.", e);
-                // Fall through
-            }
-        }
+    if (provider === 'groq' && GROQ_API_KEY) {
+        try {
+            const text = await callGroq(prompt, "Tu es un chef d'état.", false);
+            return text.trim() === "NO_RESPONSE" ? null : text;
+        } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
     }
     
     try {
-        return await executeGemini();
+        const response = await generateRobustContent(prompt, {});
+        const text = response.text?.trim();
+        return text === "NO_RESPONSE" ? null : text || "Reçu.";
     } catch (e) {
         return "Message reçu (Transmission faible).";
     }
@@ -412,8 +393,8 @@ const getFallbackResponse = (): SimulationResponse => ({
     timeIncrement: 'day',
     events: [{ 
         type: "world", 
-        headline: "Silence Radio", 
-        description: "Les communications mondiales sont perturbées. Aucune nouvelle majeure aujourd'hui. (Vérifiez votre quota API ou connexion)" 
+        headline: "Silence Radio (Surcharge Réseau)", 
+        description: "Les satellites ne répondent plus (Erreur 503). Les canaux diplomatiques sont saturés. Réessayez dans quelques instants." 
     }],
     globalTensionChange: 0,
     economyHealthChange: 0,
@@ -429,35 +410,22 @@ export const getStrategicSuggestions = async (
 ): Promise<string[]> => {
     
     const historyContext = recentHistory.slice(-5).map(e => e.headline).join('\n');
-    const prompt = `Pays: ${playerCountry}. Historique: ${historyContext}. Donne 3 actions stratégiques courtes (JSON array strings).`;
+    const prompt = `Pays: ${playerCountry}. Historique: ${historyContext}. 3 actions stratégiques courtes (JSON array).`;
 
-    const executeGemini = async () => {
-        return withRetry(async () => {
-            const schema: Schema = { type: Type.ARRAY, items: { type: Type.STRING } };
-            const response = await ai.models.generateContent({
-                model: "gemini-2.5-flash", contents: prompt,
-                config: { responseMimeType: "application/json", responseSchema: schema }
-            });
-            return JSON.parse(response.text || "[]") as string[];
-        });
-    };
-
-    if (provider === 'groq') {
-        if (!GROQ_API_KEY) {
-            // Fallback
-        } else {
-            try {
-                const json = await callGroq(prompt, "Conseiller stratégique", true, { type: "object", properties: { suggestions: { type: "array", items: { type: "string" } } } });
-                const p = JSON.parse(json);
-                return p.suggestions || p;
-            } catch (e) {
-                console.warn("Groq suggestions failed, fallback to Gemini.", e);
-                // Fall through
-            }
-        }
+    if (provider === 'groq' && GROQ_API_KEY) {
+        try {
+            const json = await callGroq(prompt, "Conseiller stratégique", true, { type: "object", properties: { suggestions: { type: "array", items: { type: "string" } } } });
+            const p = JSON.parse(json);
+            return p.suggestions || p;
+        } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
     }
 
     try {
-        return await executeGemini();
+        const schema: Schema = { type: Type.ARRAY, items: { type: Type.STRING } };
+        const response = await generateRobustContent(prompt, {
+             responseMimeType: "application/json", 
+             responseSchema: schema 
+        });
+        return JSON.parse(response.text || "[]") as string[];
     } catch (e) { return ["Renforcer l'armée", "Développer l'industrie", "Accords commerciaux"]; }
 }
