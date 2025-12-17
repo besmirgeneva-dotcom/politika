@@ -90,10 +90,12 @@ const App: React.FC = () => {
   // CUSTOM AI KEY LOGIC
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('custom_gemini_key') || "");
   const [customProviderName, setCustomProviderName] = useState<string>(() => localStorage.getItem('custom_provider_name') || "gemini");
+  // NEW: CUSTOM MODEL NAME
+  const [customModelName, setCustomModelName] = useState<string>(() => localStorage.getItem('custom_model_name') || "");
   
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [tempKey, setTempKey] = useState("");
-  const [tempProvider, setTempProvider] = useState("gemini");
+  const [tempModel, setTempModel] = useState("");
 
   const [isSyncing, setIsSyncing] = useState(true);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
@@ -311,30 +313,43 @@ const App: React.FC = () => {
   // --- CUSTOM API KEY HANDLERS ---
   const handleOpenKeyModal = () => {
       setTempKey(customApiKey || "");
-      setTempProvider(customProviderName || "gemini");
+      setTempModel(customModelName || "");
       setShowKeyModal(true);
   };
 
   const handleSaveCustomKey = () => {
       if (!tempKey.trim()) return;
-      setCustomApiKey(tempKey.trim());
-      setCustomProviderName(tempProvider);
+      const key = tempKey.trim();
+      const model = tempModel.trim();
+      let detectedProvider = 'gemini';
+
+      // Auto-detection logic extended
+      if (key.startsWith('sk-')) detectedProvider = 'openai';
+      else if (key.startsWith('gsk_')) detectedProvider = 'groq';
+      else if (key.startsWith('hf_')) detectedProvider = 'huggingface';
+
+      setCustomApiKey(key);
+      setCustomProviderName(detectedProvider);
+      setCustomModelName(model);
       
-      localStorage.setItem('custom_gemini_key', tempKey.trim());
-      localStorage.setItem('custom_provider_name', tempProvider);
+      localStorage.setItem('custom_gemini_key', key);
+      localStorage.setItem('custom_provider_name', detectedProvider);
+      localStorage.setItem('custom_model_name', model);
       
       setAiProvider('custom');
       setShowKeyModal(false);
-      showNotification("Clé API Personnelle sauvegardée !");
+      showNotification(`Clé sauvegardée (${detectedProvider.toUpperCase()}${model ? ' + Modèle' : ''})`);
   };
 
   const handleRemoveCustomKey = () => {
       setCustomApiKey("");
+      setCustomModelName("");
       localStorage.removeItem('custom_gemini_key');
       localStorage.removeItem('custom_provider_name');
+      localStorage.removeItem('custom_model_name');
       setAiProvider('gemini');
       setShowKeyModal(false);
-      showNotification("Clé supprimée. Retour aux paramètres par défaut.");
+      showNotification("Paramètres supprimés. Retour par défaut.");
   };
 
   // --- BUG REPORTING ---
@@ -416,7 +431,10 @@ const App: React.FC = () => {
       // Determiner le provider effectif
       const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
       const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
-      return await getStrategicSuggestions(gameState.playerCountry, fullHistory, effectiveProvider, apiKeyToUse);
+      // IMPORTANT: Pass custom model name if using custom provider
+      const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
+      
+      return await getStrategicSuggestions(gameState.playerCountry, fullHistory, effectiveProvider, apiKeyToUse, modelToUse);
   }
 
   // --- DIPLOMATIC CHAT HANDLER ---
@@ -433,11 +451,12 @@ const App: React.FC = () => {
 
       const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
       const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
+      const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
 
       try {
         const aiPromises = targets.map(async (targetCountry) => {
             const responseText = await sendDiplomaticMessage(
-                gameState.playerCountry!, targetCountry, targets, message, updatedHistoryForContext, context, effectiveProvider, apiKeyToUse
+                gameState.playerCountry!, targetCountry, targets, message, updatedHistoryForContext, context, effectiveProvider, apiKeyToUse, modelToUse
             );
             setTypingParticipants(prev => prev.filter(p => p !== targetCountry));
             if (!responseText) return null;
@@ -496,10 +515,11 @@ const App: React.FC = () => {
 
     const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
     const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
+    const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
 
     const result = await simulateTurn(
         gameState.playerCountry, formattedDate, finalOrderString, gameState.events, gameState.ownedTerritories,
-        entityDesc, isLandlocked, gameState.hasNuclear, recentChat, gameState.chaosLevel, effectiveProvider, apiKeyToUse
+        entityDesc, isLandlocked, gameState.hasNuclear, recentChat, gameState.chaosLevel, effectiveProvider, apiKeyToUse, modelToUse
     );
 
     const nextDate = new Date(gameState.currentDate);
@@ -519,6 +539,27 @@ const App: React.FC = () => {
 
     if (result.mapUpdates) {
         for (const update of result.mapUpdates) {
+            // TRAITEMENT DES SUPPRESSIONS
+            if (update.type === 'remove_entity') {
+                const targetLabel = (update.label || "").toLowerCase();
+                const initialCount = newEntities.length;
+                newEntities = newEntities.filter(e => {
+                    // On ne supprime que dans le pays cible
+                    if (e.country !== update.targetCountry) return true;
+                    // Si label est fourni, on filtre. Sinon on évite de tout supprimer par sécurité.
+                    if (targetLabel) {
+                        const eLabel = (e.label || "").toLowerCase();
+                        const eType = e.type.toLowerCase();
+                        // Si le label ou le type contient le mot clé (ex: "radar")
+                        return !(eLabel.includes(targetLabel) || eType.includes(targetLabel));
+                    }
+                    return true;
+                });
+                if (newEntities.length < initialCount) {
+                    showNotification(`Retrait effectué: ${update.label} en ${update.targetCountry}`);
+                }
+            }
+
             if (update.type === 'annexation') {
                 const target = update.targetCountry;
                 const newOwner = update.newOwner || gameState.playerCountry;
@@ -828,31 +869,31 @@ const App: React.FC = () => {
                     
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Fournisseur d'IA</label>
-                            <select 
-                                value={tempProvider} 
-                                onChange={(e) => setTempProvider(e.target.value)}
-                                className="w-full p-2 rounded-lg border border-stone-300 bg-stone-50 text-sm font-bold text-stone-800 focus:outline-blue-500"
-                            >
-                                <option value="gemini">Google Gemini (Recommandé)</option>
-                                <option value="openai">OpenAI (GPT-4)</option>
-                                <option value="groq">Groq (Llama 3)</option>
-                            </select>
-                        </div>
-
-                        <div>
                             <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Clé API (Secret Key)</label>
                             <input 
                                 type="text" 
                                 value={tempKey}
                                 onChange={(e) => setTempKey(e.target.value)}
-                                placeholder={tempProvider === 'openai' ? "sk-..." : tempProvider === 'gemini' ? "AIzaSy..." : "gsk_..."}
+                                placeholder="Collez votre clé ici (sk-..., gsk_..., hf_...)"
                                 className="w-full p-3 rounded-lg border border-stone-300 focus:outline-blue-500 bg-stone-50 text-sm font-mono"
                             />
                             <p className="text-[10px] text-stone-400 mt-1 italic">
-                                {tempProvider === 'gemini' && "Clé stockée localement. Google AI Studio."}
-                                {tempProvider === 'openai' && "Nécessite des crédits OpenAI. Modèle GPT-4o."}
-                                {tempProvider === 'groq' && "Ultra-rapide. Modèle Llama 3."}
+                                Supporte OpenAI, Groq, Google Gemini et Hugging Face (hf_).
+                            </p>
+                        </div>
+
+                        {/* NEW: CUSTOM MODEL FIELD */}
+                        <div>
+                            <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Nom du Modèle (Optionnel)</label>
+                            <input 
+                                type="text" 
+                                value={tempModel}
+                                onChange={(e) => setTempModel(e.target.value)}
+                                placeholder="ex: mistralai/Mistral-7B-Instruct-v0.3"
+                                className="w-full p-3 rounded-lg border border-stone-300 focus:outline-blue-500 bg-stone-50 text-sm font-mono"
+                            />
+                            <p className="text-[10px] text-stone-400 mt-1 italic">
+                                Laissez vide pour utiliser le modèle par défaut du fournisseur.
                             </p>
                         </div>
                     </div>

@@ -410,7 +410,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
   };
 
   // Affichage des étiquettes des marqueurs (points) uniquement au zoom max (10)
-  const showMarkerLabels = zoom >= 10;
+  // CHANGEMENT: Textes visibles à partir de zoom 9
+  const showMarkerLabels = zoom >= 9;
 
   // --- LOGIC: GROUP ENTITIES BY POSITION ---
   const groupedEntities = useMemo(() => {
@@ -458,7 +459,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
 
         <MapLabels zoom={zoom} visibleCountries={centers} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
 
-        {zoom >= 10 && groupedEntities.map((group, idx) => {
+        {/* CHANGEMENT: Les points (sans texte) s'affichent dès le zoom 8 */}
+        {zoom >= 8 && groupedEntities.map((group, idx) => {
             const count = group.entities.length;
             const primaryEntity = group.entities[0];
             const color = getEntityColor(primaryEntity.type); // Color of the first, or logic for mixed

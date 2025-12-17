@@ -5,8 +5,8 @@ import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel } from "../types
 const DEFAULT_API_KEY = process.env.API_KEY;
 const GROQ_API_KEY_ENV = process.env.VITE_GROQ_API_KEY || "";
 
-// On étend le type pour inclure openai
-export type AIProvider = 'gemini' | 'groq' | 'openai' | 'custom';
+// On étend le type pour inclure huggingface
+export type AIProvider = 'gemini' | 'groq' | 'openai' | 'huggingface' | 'custom';
 
 // Helper pour obtenir l'instance Gemini avec la bonne clé
 const getAIClient = (customKey?: string) => {
@@ -24,6 +24,7 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
         const errString = JSON.stringify(error);
         const errMsg = error?.message || "";
         
+        // Detection 429 (Rate Limit)
         if (
             error?.status === 429 || 
             error?.code === 429 ||
@@ -35,13 +36,15 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
             isRateLimit = true;
         }
 
+        // Detection 503 (Service Unavailable / Model Loading)
         if (
             error?.status === 503 || 
             error?.code === 503 ||
             errString.includes("503") || 
             errMsg.includes("503") || 
             errMsg.toLowerCase().includes("overloaded") ||
-            errMsg.toLowerCase().includes("unavailable")
+            errMsg.toLowerCase().includes("unavailable") ||
+            errMsg.toLowerCase().includes("loading") // Pour Hugging Face "Model is loading"
         ) {
             isServerOverload = true;
         }
@@ -104,7 +107,17 @@ RÈGLES D'OR POUR L'IA (CRITIQUE):
    - **Déploiement Frontalier**: Si le joueur vise une frontière (ex: "Frontière France-Espagne"), place le point LÉGÈREMENT à l'intérieur du pays propriétaire de l'unité (ex: France). Ne le place JAMAIS pile sur la ligne ou chez le voisin (Espagne), pour éviter les confusions visuelles. Reste prudent.
    - **Déploiement Précis (Ville)**: Si une ville est citée, sois précis mais vérifie que les coordonnées sont bien DANS le pays.
 
-3. **PRÉCISION DES POSSESSIONS**:
+3. **SUPPRESSION / RETRAIT (IMPORTANT)**:
+   - Si le joueur demande de retirer, démanteler, rappeler ou supprimer des unités/structures (ex: "Retire les radars au Kosovo").
+   - Utilise \`mapUpdates\` avec \`type: "remove_entity"\`.
+   - Dans le champ \`label\`, mets le mot-clé de ce qu'il faut supprimer (ex: "radar", "base", "troupes"). Si vide, le moteur risque de ne rien supprimer.
+
+4. **ANNEXION ET EXPANSION (FACILITÉ)**:
+   - **Alliés & Faibles**: Si le joueur tente d'annexer un pays allié, un vassal, ou un pays beaucoup plus faible (ex: France annexe Monaco, USA annexe Panama), SOIS TRÈS PERMISSIF.
+   - **Validation**: Valide l'annexion via \`mapUpdates\` -> \`type: "annexation"\` immédiatement si la force militaire ou l'influence politique est suffisante. Ne crée pas de résistance artificielle inutile pour ces cas "faciles".
+   - **Résistance**: Réserve la résistance acharnée pour les invasions de grandes puissances ou de rivaux directs.
+
+5. **PRÉCISION DES POSSESSIONS**:
    - Ne place jamais une base du joueur dans un pays qu'il ne contrôle pas (sauf invasion explicite).
 
 Format de réponse attendu : JSON UNIQUEMENT.
@@ -125,7 +138,7 @@ const RESPONSE_SCHEMA_JSON = {
             relatedCountry: { type: "string" }
           },
           required: ["type", "headline", "description"]
-        },
+        }
       },
       globalTensionChange: { type: "integer" },
       economyHealthChange: { type: "integer" },
@@ -138,14 +151,14 @@ const RESPONSE_SCHEMA_JSON = {
         items: {
             type: "object",
             properties: {
-                type: { type: "string", enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'build_base', 'troop_deployment'] },
+                type: { type: "string", enum: ["annexation", "build_factory", "build_port", "build_airport", "build_airbase", "build_defense", "build_base", "troop_deployment", "remove_entity"] },
                 targetCountry: { type: "string" },
                 newOwner: { type: "string" },
                 lat: { type: "number" },
                 lng: { type: "number" },
                 label: { type: "string" }
             },
-            required: ['type', 'targetCountry']
+            required: ["type", "targetCountry"]
         }
       },
       incomingMessages: {
@@ -171,19 +184,26 @@ const RESPONSE_SCHEMA_JSON = {
           },
           required: ["action"]
       }
-      },
-      required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
+    },
+    required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"]
 };
 
-// --- OPENAI HELPER ---
-const callOpenAI = async (prompt: string, system: string, apiKey: string, jsonMode: boolean = true): Promise<string> => {
+// --- GENERIC OPENAI-COMPATIBLE HELPER (OpenAI, Groq, Hugging Face) ---
+const callOpenAICompatible = async (
+    url: string,
+    model: string,
+    prompt: string, 
+    system: string, 
+    apiKey: string, 
+    jsonMode: boolean = true
+): Promise<string> => {
     try {
         let systemContent = system;
         if (jsonMode) {
-             systemContent += "\n\nCRITIQUE: REPONDS UNIQUEMENT EN JSON VALIDE. SCHEMA:\n" + JSON.stringify(RESPONSE_SCHEMA_JSON);
+             systemContent += "\n\nCRITIQUE: TU DOIS REPONDRE UNIQUEMENT AVEC UN JSON VALIDE. PAS DE MARKDOWN. SCHEMA OBLIGATOIRE:\n" + JSON.stringify(RESPONSE_SCHEMA_JSON);
         }
 
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        const response = await fetch(url, {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${apiKey}`,
@@ -194,64 +214,22 @@ const callOpenAI = async (prompt: string, system: string, apiKey: string, jsonMo
                     { role: "system", content: systemContent },
                     { role: "user", content: prompt }
                 ],
-                model: "gpt-4o", // Utilisation de GPT-4o par défaut pour meilleure qualité
-                temperature: 0.8,
-                max_tokens: 2048,
-                response_format: jsonMode ? { type: "json_object" } : undefined
-            })
-        });
-
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(`OpenAI Error: ${JSON.stringify(err)}`);
-        }
-
-        const data = await response.json();
-        return data.choices[0]?.message?.content || "";
-    } catch (e) {
-        console.error("OpenAI Call Failed:", e);
-        throw e;
-    }
-};
-
-// --- GROQ HELPER ---
-const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, apiKey?: string): Promise<string> => {
-    try {
-        const keyToUse = apiKey || GROQ_API_KEY_ENV;
-        if (!keyToUse) throw new Error("Clé API Groq manquante.");
-
-        let systemContent = system;
-        if (jsonMode) {
-             systemContent += "\n\nCRITIQUE: TU DOIS REPONDRE UNIQUEMENT AVEC UN JSON VALIDE. PAS DE MARKDOWN. SCHEMA OBLIGATOIRE:\n" + JSON.stringify(RESPONSE_SCHEMA_JSON);
-        }
-
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${keyToUse}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                messages: [
-                    { role: "system", content: systemContent },
-                    { role: "user", content: prompt }
-                ],
-                model: "llama-3.3-70b-versatile",
+                model: model,
                 temperature: 0.75,
                 max_tokens: 2048,
                 response_format: jsonMode ? { type: "json_object" } : undefined
             })
         });
-        
+
         if (!response.ok) {
-            const errData = await response.json();
-            throw new Error(`Groq API Error ${response.status}: ${JSON.stringify(errData)}`);
+            const errData = await response.json().catch(() => ({ error: response.statusText }));
+            throw new Error(`API Error ${response.status}: ${JSON.stringify(errData)}`);
         }
-        
+
         const data = await response.json();
         return data.choices[0]?.message?.content || "";
     } catch (e) {
-        console.error("Groq execution failed:", e);
+        console.error(`Call to ${url} failed:`, e);
         throw e;
     }
 };
@@ -267,8 +245,9 @@ export const simulateTurn = async (
   hasNuclear: boolean = false,
   diplomaticContext: string = "",
   chaosLevel: ChaosLevel = 'normal',
-  provider: string = 'gemini', // Changed type to string to support custom values
-  customApiKey?: string
+  provider: string = 'gemini', 
+  customApiKey?: string,
+  customModel?: string // Paramètre optionnel pour le modèle
 ): Promise<SimulationResponse> => {
   
   const historyContext = recentHistory.slice(-15).map(e => `[${e.date}] ${e.type.toUpperCase()}: ${e.headline}`).join('\n');
@@ -295,8 +274,10 @@ export const simulateTurn = async (
     1. **OBLIGATOIRE: Juger l'action du joueur**:
        - Tu DOIS inclure un événement de type "player" en première position.
        - Cet événement doit décrire le résultat de l'ordre "${playerAction}".
-       - Si le joueur construit ou déploie des troupes, tu DOIS ajouter un élément dans "mapUpdates".
-       - **RAPPEL GEO CRITIQUE**: Utilise TOUJOURS \`lat: 0, lng: 0\` pour un déploiement général (centre du pays). Pour une frontière, place le point nettement à l'intérieur du pays pour éviter de déborder chez le voisin.
+       - Si le joueur construit ou déploie des troupes, tu DOIS ajouter un élément dans "mapUpdates" avec type adapté (ex: troop_deployment).
+       - Si le joueur retire ou supprime des unités, tu DOIS ajouter un élément dans "mapUpdates" avec type "remove_entity" et préciser le "label".
+       - Si le joueur annexe un pays (surtout faible/allié), valide l'annexion via "mapUpdates" -> "annexation" si c'est plausible.
+       - **RAPPEL GEO CRITIQUE**: Utilise TOUJOURS \`lat: 0, lng: 0\` pour un déploiement général (centre du pays).
     
     2. **Simuler le Reste du Monde**: Génère ensuite des événements qui n'impliquent PAS le joueur.
     3. **Définir le Temps**: Choisis 'day' si urgence/guerre, 'month' si tensions, 'year' si calme.
@@ -305,21 +286,39 @@ export const simulateTurn = async (
     Sois créatif. Surprends le joueur. Ne sois pas passif.
   `;
 
+  // --- HUGGING FACE ROUTING ---
+  if (provider === 'huggingface' && customApiKey) {
+      try {
+          // Utilisation d'un modèle par défaut solide si aucun n'est spécifié
+          // "mistralai/Mistral-7B-Instruct-v0.3" est un bon compromis gratuit/logique
+          const modelToUse = customModel || "mistralai/Mistral-7B-Instruct-v0.3";
+          // Endpoint compatible OpenAI pour HF
+          const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
+          const jsonStr = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, SYSTEM_INSTRUCTION, customApiKey, true));
+          return JSON.parse(jsonStr) as SimulationResponse;
+      } catch (error) {
+          console.error("Hugging Face error", error);
+      }
+  }
+
   // --- OPENAI ROUTING ---
   if (provider === 'openai' && customApiKey) {
       try {
-          const jsonStr = await callOpenAI(prompt, SYSTEM_INSTRUCTION, customApiKey, true);
+          const modelToUse = customModel || "gpt-4o";
+          const jsonStr = await callOpenAICompatible("https://api.openai.com/v1/chat/completions", modelToUse, prompt, SYSTEM_INSTRUCTION, customApiKey, true);
           return JSON.parse(jsonStr) as SimulationResponse;
       } catch (error) {
           console.error("OpenAI error", error);
-          // Fallback handled below
       }
   }
 
   // --- GROQ ROUTING ---
   if (provider === 'groq') {
       try {
-          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, customApiKey);
+          const keyToUse = customApiKey || GROQ_API_KEY_ENV;
+          if (!keyToUse) throw new Error("Clé API Groq manquante.");
+          const modelToUse = customModel || "llama-3.3-70b-versatile";
+          const jsonStr = await callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", modelToUse, prompt, SYSTEM_INSTRUCTION, keyToUse, true);
           return JSON.parse(jsonStr) as SimulationResponse;
       } catch (error) {
           console.warn("Groq failed, fallback to Gemini.", error);
@@ -342,7 +341,7 @@ export const simulateTurn = async (
               relatedCountry: { type: Type.STRING }
           },
           required: ["type", "headline", "description"]
-          },
+          }
       },
       globalTensionChange: { type: Type.INTEGER },
       economyHealthChange: { type: Type.INTEGER },
@@ -355,14 +354,14 @@ export const simulateTurn = async (
           items: {
               type: Type.OBJECT,
               properties: {
-                  type: { type: Type.STRING, enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'build_base', 'troop_deployment'] },
+                  type: { type: Type.STRING, enum: ["annexation", "build_factory", "build_port", "build_airport", "build_airbase", "build_defense", "build_base", "troop_deployment", "remove_entity"] },
                   targetCountry: { type: Type.STRING },
                   newOwner: { type: Type.STRING },
                   lat: { type: Type.NUMBER },
                   lng: { type: Type.NUMBER },
                   label: { type: Type.STRING }
               },
-              required: ['type', 'targetCountry']
+              required: ["type", "targetCountry"]
           }
       },
       incomingMessages: {
@@ -389,7 +388,7 @@ export const simulateTurn = async (
           required: ["action"]
       }
       },
-      required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
+      required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"]
   };
 
   try {
@@ -397,8 +396,8 @@ export const simulateTurn = async (
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: geminiSchema,
-          temperature: chaosLevel === 'chaos' ? 0.95 : 0.8,
-      }, customApiKey); // Use custom key if provider is 'gemini' and key provided (or fallback logic in App.tsx)
+          temperature: chaosLevel === 'chaos' ? 0.95 : 0.8
+      }, customApiKey); 
       const text = response.text;
       if (!text) throw new Error("No AI response");
       return JSON.parse(text) as SimulationResponse;
@@ -416,7 +415,8 @@ export const sendDiplomaticMessage = async (
     history: ChatMessage[],
     context: { militaryPower: number; economyHealth: number; globalTension: number; hasNuclear: boolean; },
     provider: string = 'gemini',
-    customApiKey?: string
+    customApiKey?: string,
+    customModel?: string
 ): Promise<string | null> => {
     
     const conversationContext = history
@@ -443,16 +443,30 @@ export const sendDiplomaticMessage = async (
     Réponse (1-2 phrases max) :
     `;
 
+    // Hugging Face
+    if (provider === 'huggingface' && customApiKey) {
+        try {
+            const modelToUse = customModel || "mistralai/Mistral-7B-Instruct-v0.3";
+            const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
+            const text = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, "Tu es un chef d'état. Réponds directement.", customApiKey, false));
+            return text.trim() === "NO_RESPONSE" ? null : text;
+        } catch (e) { console.warn("Hugging Face failed."); }
+    }
+
+    // OpenAI
     if (provider === 'openai' && customApiKey) {
         try {
-            const text = await callOpenAI(prompt, "Tu es un chef d'état. Réponds directement.", customApiKey, false);
+            const modelToUse = customModel || "gpt-4o";
+            const text = await callOpenAICompatible("https://api.openai.com/v1/chat/completions", modelToUse, prompt, "Tu es un chef d'état. Réponds directement.", customApiKey, false);
             return text.trim() === "NO_RESPONSE" ? null : text;
         } catch (e) { console.warn("OpenAI failed."); }
     }
 
+    // Groq
     if (provider === 'groq') {
         try {
-            const text = await callGroq(prompt, "Tu es un chef d'état réaliste. Réponds directement. Pas de préambule.", false, customApiKey);
+            const modelToUse = customModel || "llama-3.3-70b-versatile";
+            const text = await callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", modelToUse, prompt, "Tu es un chef d'état réaliste.", customApiKey || GROQ_API_KEY_ENV, false);
             return text.trim() === "NO_RESPONSE" ? null : text;
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
     }
@@ -486,7 +500,8 @@ export const getStrategicSuggestions = async (
     playerCountry: string,
     recentHistory: GameEvent[],
     provider: string = 'gemini',
-    customApiKey?: string
+    customApiKey?: string,
+    customModel?: string
 ): Promise<string[]> => {
     
     const historyContext = recentHistory.slice(-5).map(e => e.headline).join('\n');
@@ -498,9 +513,21 @@ export const getStrategicSuggestions = async (
     Format JSON: {"suggestions": ["action 1", "action 2", "action 3"]}
     `;
 
+    // Hugging Face
+    if (provider === 'huggingface' && customApiKey) {
+        try {
+            const modelToUse = customModel || "mistralai/Mistral-7B-Instruct-v0.3";
+            const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
+            const json = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, "Conseiller stratégique. JSON.", customApiKey, true));
+            const p = JSON.parse(json);
+            return p.suggestions || p;
+        } catch (e) { console.warn("Hugging Face failed."); }
+    }
+
     if (provider === 'openai' && customApiKey) {
         try {
-            const json = await callOpenAI(prompt, "Conseiller stratégique. JSON uniquement.", customApiKey, true);
+            const modelToUse = customModel || "gpt-4o";
+            const json = await callOpenAICompatible("https://api.openai.com/v1/chat/completions", modelToUse, prompt, "Conseiller stratégique. JSON.", customApiKey, true);
             const p = JSON.parse(json);
             return p.suggestions || p;
         } catch (e) { console.warn("OpenAI failed."); }
@@ -508,7 +535,8 @@ export const getStrategicSuggestions = async (
 
     if (provider === 'groq') {
         try {
-            const json = await callGroq(prompt, "Conseiller stratégique (Realpolitik). JSON uniquement.", true, customApiKey);
+            const modelToUse = customModel || "llama-3.3-70b-versatile";
+            const json = await callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", modelToUse, prompt, "Conseiller stratégique. JSON.", customApiKey || GROQ_API_KEY_ENV, true);
             const p = JSON.parse(json);
             return p.suggestions || p;
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
