@@ -7,8 +7,8 @@ export interface GameEvent {
   relatedCountry?: string; // Pour centrer la caméra
 }
 
-// Types restreints aux demandes militaires + logistique
-export type MapEntityType = 'factory' | 'port' | 'military_airport' | 'airbase' | 'defense' | 'military_base' | 'troops';
+// Types restreints aux demandes militaires
+export type MapEntityType = 'factory' | 'port' | 'military_airport' | 'airbase' | 'defense';
 
 export interface MapEntity {
   id: string;
@@ -58,7 +58,6 @@ export interface GameState {
   chatHistory: ChatMessage[];
   chaosLevel: ChaosLevel;
   alliance: Alliance | null;
-  historySummary: string; // NOUVEAU: Résumé compressé de l'histoire
   isGameOver: boolean; // État de défaite
   gameOverReason: string | null;
 }
@@ -78,12 +77,12 @@ export interface SimulationResponse {
   corruptionChange: number; // Changement de corruption
   spaceProgramActive?: boolean; // Mise à jour explicite du programme spatial
   mapUpdates?: {
-    type: 'annexation' | 'build_factory' | 'build_port' | 'build_airport' | 'build_airbase' | 'build_defense' | 'build_base' | 'troop_deployment' | 'remove_entity';
+    type: 'annexation' | 'build_factory' | 'build_port' | 'build_airport' | 'build_airbase' | 'build_defense';
     targetCountry: string;
     newOwner?: string; // Le pays qui prend le contrôle (ou "INDEPENDENT" pour libération)
     lat?: number;
     lng?: number;
-    label?: string; // Pour remove_entity, sert de filtre (ex: "radar")
+    label?: string;
   }[];
   incomingMessages?: {
       sender: string;
