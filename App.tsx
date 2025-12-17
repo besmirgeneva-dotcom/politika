@@ -14,7 +14,6 @@ import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc
 
 const INITIAL_DATE = new Date('2000-01-01');
 
-// --- TYPES FOR SAVE SYSTEM ---
 interface SaveMetadata {
     id: string;
     country: string;
@@ -82,15 +81,10 @@ const App: React.FC = () => {
   const [hasSave, setHasSave] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
   const [isSyncing, setIsSyncing] = useState(true);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
-  const [showBugReportModal, setShowBugReportModal] = useState(false);
-  const [bugTitle, setBugTitle] = useState("");
-  const [bugDescription, setBugDescription] = useState("");
-  const [isSendingBug, setIsSendingBug] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
@@ -257,7 +251,6 @@ const App: React.FC = () => {
           setIsGlobalLoading(false); 
       }
       setIsSettingsOpen(false);
-      setIsLoadMenuOpen(false);
   };
 
   const showNotification = (msg: string) => {
@@ -280,22 +273,6 @@ const App: React.FC = () => {
       } catch (err: any) { showNotification("Erreur d'authentification."); }
   };
   const handleLogout = async () => { await logout(); setAppMode('portal_landing'); };
-  const handleLogin = () => { setAppMode('portal_landing'); setShowLoginModal(true); };
-
-  const handleSendBugReport = async () => {
-      if (!bugTitle.trim() || !bugDescription.trim()) return;
-      setIsSendingBug(true);
-      try {
-          if (db) {
-              await addDoc(collection(db, "bug_reports"), {
-                  title: bugTitle, description: bugDescription, userEmail: user?.email, userId: user?.uid, timestamp: Date.now(), status: 'new'
-              });
-          }
-          showNotification("Signalement envoyé");
-      } catch (e) { showNotification("Erreur d'envoi"); } finally {
-          setIsSendingBug(false); setShowBugReportModal(false); setBugTitle(""); setBugDescription("");
-      }
-  };
 
   const launchGeoSim = () => {
       setGameState({
@@ -479,33 +456,41 @@ const App: React.FC = () => {
 
   if (appMode === 'portal_landing') {
       return (
-          <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-black selection:text-white overflow-x-hidden">
-              <nav className="relative flex items-center justify-center px-6 py-6 max-w-7xl mx-auto">
-                  <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-black rounded-full border-4 border-slate-200"></div>
-                      <h1 className="text-2xl font-black tracking-tight uppercase">Politika</h1>
+          <div className="min-h-screen bg-stone-950 text-white font-sans selection:bg-emerald-500 selection:text-white flex flex-col items-center justify-center p-6">
+              <div className="max-w-md w-full text-center space-y-12">
+                  <GameLogo size="large" theme="dark" />
+                  <div className="space-y-4">
+                      <h2 className="text-3xl font-black leading-tight tracking-tighter uppercase italic">Redéfinissez l'Ordre Mondial</h2>
+                      <p className="text-stone-400 text-sm">Simulation géopolitique avancée. Prenez les rênes d'une nation en l'an 2000.</p>
                   </div>
-              </nav>
-              <main className="max-w-7xl mx-auto px-6 mt-10 md:mt-20 flex flex-col md:flex-row items-center gap-12">
-                  <div className="flex-1 space-y-6 text-center md:text-left">
-                      <h2 className="text-5xl md:text-7xl font-black leading-tight tracking-tighter">RÉÉCRIVEZ<br/>L'HISTOIRE.</h2>
-                      <p className="text-lg text-slate-500 max-w-md mx-auto md:mx-0">Le destin des nations est entre vos mains.</p>
-                      <button onClick={user ? () => setAppMode('portal_dashboard') : () => setShowLoginModal(true)} className="px-8 py-4 rounded-xl font-bold text-lg shadow-xl bg-blue-600 text-white hover:bg-blue-700 transition-transform hover:scale-105">
-                          {user ? "ACCÉDER AU QG" : "JOUER"} <span>➔</span>
-                      </button>
+                  <div className="flex flex-col gap-4">
+                    <button onClick={user ? () => setAppMode('portal_dashboard') : () => setShowLoginModal(true)} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-all transform active:scale-95">
+                        {user ? "ACCÉDER AU QG" : "DÉMARRER LA MISSION"}
+                    </button>
+                    {!user && (
+                        <button onClick={() => { setIsRegistering(false); setShowLoginModal(true); }} className="text-xs text-stone-500 hover:text-white transition-colors">Déjà un compte ? Connexion</button>
+                    )}
                   </div>
-              </main>
+              </div>
+              
               {showLoginModal && (
-                  <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
-                          <h3 className="text-xl font-bold mb-4">{isRegistering ? "S'inscrire" : "Connexion"}</h3>
+                  <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+                      <div className="bg-stone-900 border border-stone-800 rounded-xl shadow-2xl p-8 max-w-sm w-full">
+                          <div className="flex justify-between items-center mb-6">
+                              <h3 className="text-xl font-bold uppercase tracking-widest text-emerald-500">{isRegistering ? "Recrutement" : "Accès Sécurisé"}</h3>
+                              <button onClick={() => setShowLoginModal(false)} className="text-stone-500 hover:text-white">✕</button>
+                          </div>
                           <form onSubmit={handleEmailAuth} className="space-y-4">
-                              <input type="email" required className="w-full p-3 rounded-lg border" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
-                              <input type="password" required className="w-full p-3 rounded-lg border" placeholder="Mot de passe" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} />
-                              <button type="submit" className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg">{isRegistering ? "Créer compte" : "Entrer"}</button>
+                              <input type="email" required className="w-full bg-stone-950 border border-stone-800 p-3 rounded text-sm text-white focus:outline-none focus:border-emerald-500" placeholder="IDENTIFIANT EMAIL" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
+                              <input type="password" required className="w-full bg-stone-950 border border-stone-800 p-3 rounded text-sm text-white focus:outline-none focus:border-emerald-500" placeholder="MOT DE PASSE" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} />
+                              <button type="submit" className="w-full py-3 bg-emerald-600 text-white font-bold rounded uppercase tracking-widest text-xs hover:bg-emerald-500">{isRegistering ? "Créer Dossier" : "Valider Accès"}</button>
                           </form>
-                          <button onClick={() => setIsRegistering(!isRegistering)} className="mt-4 text-xs text-blue-600 font-bold w-full">{isRegistering ? "Déjà un compte ?" : "Pas encore de compte ?"}</button>
-                          <button onClick={handleGoogleLogin} className="mt-4 w-full py-2 bg-white border font-bold rounded-lg flex items-center justify-center gap-2">Google</button>
+                          <button onClick={() => setIsRegistering(!isRegistering)} className="mt-6 text-[10px] text-stone-500 hover:text-emerald-400 font-bold uppercase tracking-widest w-full">{isRegistering ? "Utiliser un compte existant" : "Nouveau dirigeant ? S'inscrire"}</button>
+                          <div className="mt-6 pt-6 border-t border-stone-800">
+                             <button onClick={handleGoogleLogin} className="w-full py-2 bg-stone-800 border border-stone-700 font-bold rounded text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-stone-700 transition-colors">
+                                <span className="text-lg">G</span> Auth via Google
+                             </button>
+                          </div>
                       </div>
                   </div>
               )}
@@ -515,28 +500,60 @@ const App: React.FC = () => {
 
   if (appMode === 'portal_dashboard') {
       return (
-          <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-              <header className="bg-white border-b px-6 py-4 flex justify-between items-center sticky top-0 z-20">
-                  <h1 className="text-xl font-black uppercase">Politika</h1>
+          <div className="min-h-screen bg-stone-950 text-white font-sans flex flex-col">
+              <header className="bg-stone-900/50 border-b border-stone-800 px-8 py-4 flex justify-between items-center sticky top-0 z-20 backdrop-blur-md">
                   <div className="flex items-center gap-4">
-                      <button onClick={handleLogout} className="text-red-500 font-bold text-xs">Déconnexion</button>
+                      <div className="w-8 h-8 border-2 border-emerald-500 rounded-full flex items-center justify-center">
+                          <div className="w-4 h-4 bg-emerald-500 rounded-full animate-pulse"></div>
+                      </div>
+                      <h1 className="text-xl font-black uppercase tracking-tighter">GeoSim <span className="text-emerald-500">Dashboard</span></h1>
+                  </div>
+                  <div className="flex items-center gap-6">
+                      <div className="text-[10px] uppercase font-bold text-stone-500">
+                          Agent: <span className="text-stone-300">{user?.email?.split('@')[0]}</span>
+                      </div>
+                      <button onClick={handleLogout} className="px-4 py-1.5 border border-red-900/50 text-red-500 font-bold text-[10px] uppercase tracking-widest rounded hover:bg-red-950/30 transition-colors">Quitter</button>
                   </div>
               </header>
-              <main className="max-w-6xl mx-auto p-6 md:p-10 grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="bg-white rounded-2xl p-6 border shadow-sm hover:shadow-xl transition-all cursor-pointer h-64 flex flex-col" onClick={launchGeoSim}>
-                      <h3 className="text-2xl font-bold mb-2">GeoSim</h3>
-                      <p className="text-sm text-slate-500 flex-1">Simulation globale An 2000.</p>
-                      <button className="w-full py-3 bg-black text-white font-bold rounded-lg">LANCER</button>
+              <main className="max-w-6xl mx-auto w-full p-8 grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1">
+                  <div className="lg:col-span-1 space-y-6">
+                      <div className="bg-stone-900 border border-stone-800 rounded-xl p-6 shadow-2xl hover:border-emerald-900/50 transition-all group cursor-pointer" onClick={launchGeoSim}>
+                          <div className="flex justify-between items-start mb-6">
+                              <h3 className="text-2xl font-black italic uppercase">Nouvelle Campagne</h3>
+                              <span className="bg-emerald-900/30 text-emerald-500 text-[10px] px-2 py-0.5 rounded font-bold border border-emerald-900/50">AN 2000</span>
+                          </div>
+                          <p className="text-xs text-stone-500 mb-8 leading-relaxed">Démarrez une nouvelle simulation géopolitique à l'aube du 21ème siècle. Tous les paramètres mondiaux seront réinitialisés.</p>
+                          <button className="w-full py-3 bg-emerald-600 group-hover:bg-emerald-500 text-white font-bold rounded text-xs uppercase tracking-widest transition-all">Initialiser Simulation</button>
+                      </div>
                   </div>
-                  <div className="col-span-1 md:col-span-2 bg-white rounded-2xl border p-4">
-                      <h3 className="font-bold mb-4">Sauvegardes Cloud</h3>
-                      <div className="space-y-2">
-                        {availableSaves.map(save => (
-                            <div key={save.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                                <div><div className="font-bold text-sm">{save.country}</div><div className="text-[10px]">{save.date}</div></div>
-                                <button onClick={() => loadGameById(save.id)} className="px-4 py-1.5 bg-blue-600 text-white rounded font-bold text-xs">Charger</button>
+                  
+                  <div className="lg:col-span-2 bg-stone-900 border border-stone-800 rounded-xl p-8 flex flex-col overflow-hidden">
+                      <div className="flex justify-between items-center mb-8">
+                          <h3 className="font-black uppercase tracking-widest text-sm text-stone-500">États des Campagnes Sauvegardées</h3>
+                          {isSyncing && <div className="text-[10px] animate-pulse text-emerald-500">SYNC CLOUD...</div>}
+                      </div>
+                      <div className="flex-1 overflow-y-auto space-y-4 pr-2 scrollbar-hide">
+                        {availableSaves.length === 0 ? (
+                            <div className="h-full flex flex-col items-center justify-center text-stone-600 italic text-sm border-2 border-dashed border-stone-800 rounded-xl p-10">
+                                Aucun dossier de mission localisé.
                             </div>
-                        ))}
+                        ) : (
+                            availableSaves.map(save => (
+                                <div key={save.id} className="flex items-center justify-between p-4 bg-stone-950 border border-stone-800 rounded-lg hover:border-stone-700 transition-all">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-stone-900 rounded border border-stone-800 flex items-center justify-center text-lg">📁</div>
+                                        <div>
+                                            <div className="font-bold text-sm uppercase tracking-tight">{save.country}</div>
+                                            <div className="text-[9px] text-stone-500 font-bold uppercase">Dernier rapport : {save.date} | Tour : {save.turn}</div>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <button onClick={() => deleteSave(save.id)} className="p-2 text-stone-600 hover:text-red-500 transition-colors">🗑️</button>
+                                        <button onClick={() => loadGameById(save.id)} className="px-6 py-2 bg-stone-800 hover:bg-emerald-600 text-white rounded font-bold text-[10px] uppercase tracking-widest transition-all">Reprendre Accès</button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
                       </div>
                   </div>
               </main>
@@ -545,44 +562,97 @@ const App: React.FC = () => {
   }
 
   if (appMode === 'game_active') {
-    if (currentScreen === 'splash') return <div className="w-screen h-screen bg-white flex items-center justify-center"><GameLogo size="large" theme="light" /></div>;
-    if (currentScreen === 'loading') return <div className="w-screen h-screen bg-white flex flex-col items-center justify-center"><div className="w-64 h-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 animate-[width_3s_ease-in-out_forwards]" style={{width: '0%'}}></div></div><div className="text-[10px] mt-2 font-bold animate-pulse">RECALIBRAGE...</div></div>;
+    if (currentScreen === 'splash') return <div className="w-screen h-screen bg-stone-950 flex items-center justify-center animate-fade-in"><GameLogo size="large" theme="dark" /></div>;
+    if (currentScreen === 'loading') return <div className="w-screen h-screen bg-stone-950 flex flex-col items-center justify-center"><div className="w-64 h-1 bg-stone-900 rounded-full overflow-hidden mb-4"><div className="h-full bg-emerald-500 animate-[width_3s_ease-in-out_forwards]" style={{width: '0%'}}></div></div><div className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-500 animate-pulse">Initialisation des systèmes tactiques...</div></div>;
 
     return (
-        <div className="relative w-screen h-screen overflow-hidden bg-stone-900">
+        <div className="relative w-screen h-screen overflow-hidden bg-stone-950">
             <WorldMap playerCountry={gameState.playerCountry} ownedTerritories={gameState.ownedTerritories} mapEntities={gameState.mapEntities} onRegionClick={handleRegionSelect} focusCountry={focusCountry} />
-            <div className="absolute top-4 left-4 z-20 flex gap-2 bg-black/60 p-2 rounded-lg border border-white/10 backdrop-blur-md">
-                {['Tension', 'Économie', 'Popularité', 'Militaire'].map(stat => (
-                    <div key={stat} className="flex flex-col w-16">
-                        <span className="text-[8px] uppercase text-stone-300 font-bold">{stat}</span>
-                        <div className="h-1 bg-white/20 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500" style={{width: `${stat === 'Tension' ? gameState.globalTension : stat === 'Économie' ? gameState.economyHealth : stat === 'Popularité' ? gameState.popularity : gameState.militaryPower}%`}}></div>
+            
+            {/* HUD: TOP STATS */}
+            <div className="absolute top-6 left-6 z-20 flex gap-4">
+                <div className="bg-stone-900/90 backdrop-blur-md p-3 px-5 rounded border border-stone-800 shadow-2xl flex gap-8">
+                    {['Tension', 'Économie', 'Popularité', 'Militaire'].map(stat => (
+                        <div key={stat} className="flex flex-col w-20">
+                            <span className="text-[9px] uppercase text-stone-500 font-black tracking-tighter mb-1">{stat}</span>
+                            <div className="h-1.5 bg-stone-800 rounded-full overflow-hidden">
+                                <div 
+                                    className={`h-full transition-all duration-1000 ${
+                                        stat === 'Tension' ? 'bg-red-500' : 
+                                        stat === 'Économie' ? 'bg-emerald-500' : 
+                                        stat === 'Popularité' ? 'bg-blue-500' : 
+                                        'bg-orange-500'
+                                    }`} 
+                                    style={{width: `${stat === 'Tension' ? gameState.globalTension : stat === 'Économie' ? gameState.economyHealth : stat === 'Popularité' ? gameState.popularity : gameState.militaryPower}%`}}
+                                ></div>
+                            </div>
                         </div>
-                    </div>
-                ))}
-            </div>
-            <DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing} />
-            <div className="absolute bottom-6 left-6 z-20 flex gap-3">
-                <button onClick={() => toggleWindow('events')} className={`w-12 h-12 rounded-full shadow-xl flex items-center justify-center bg-white text-xl ${activeWindow === 'events' ? 'ring-2 ring-blue-500' : ''}`}>📝</button>
-                <div className="relative">
-                    <button onClick={() => toggleWindow('chat')} className={`w-12 h-12 rounded-full shadow-xl flex items-center justify-center bg-white text-xl ${activeWindow === 'chat' ? 'ring-2 ring-blue-500' : ''}`}>💬</button>
-                    {hasUnreadChat && <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-pulse border border-white"></div>}
+                    ))}
                 </div>
-                <button onClick={() => toggleWindow('history')} className="w-12 h-12 rounded-full shadow-xl flex items-center justify-center bg-white text-xl">📚</button>
-                {gameState.alliance && <button onClick={() => toggleWindow('alliance')} className="w-12 h-12 rounded-full shadow-xl flex items-center justify-center bg-white text-xl">🤝</button>}
             </div>
-            <button onClick={() => setIsSettingsOpen(true)} className="absolute top-4 right-4 z-20 p-2 bg-black/60 text-white rounded-full">⚙️</button>
+
+            <DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing} />
+            
+            {/* HUD: BOTTOM CONTROLS */}
+            <div className="absolute bottom-8 left-8 z-20 flex gap-4">
+                <button onClick={() => toggleWindow('events')} className={`w-14 h-14 rounded bg-stone-900/95 border border-stone-800 shadow-2xl flex items-center justify-center text-2xl transition-all hover:bg-emerald-600 hover:border-emerald-500 group ${activeWindow === 'events' ? 'bg-emerald-600 border-emerald-500 scale-110' : ''}`}>
+                    <span className="group-hover:scale-110 transition-transform">📝</span>
+                </button>
+                <div className="relative">
+                    <button onClick={() => toggleWindow('chat')} className={`w-14 h-14 rounded bg-stone-900/95 border border-stone-800 shadow-2xl flex items-center justify-center text-2xl transition-all hover:bg-blue-600 hover:border-blue-500 group ${activeWindow === 'chat' ? 'bg-blue-600 border-blue-500 scale-110' : ''}`}>
+                        <span className="group-hover:scale-110 transition-transform">💬</span>
+                    </button>
+                    {hasUnreadChat && <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full animate-bounce border-2 border-stone-950"></div>}
+                </div>
+                <button onClick={() => toggleWindow('history')} className="w-14 h-14 rounded bg-stone-900/95 border border-stone-800 shadow-2xl flex items-center justify-center text-2xl transition-all hover:bg-stone-700 group">
+                    <span className="group-hover:scale-110 transition-transform">📚</span>
+                </button>
+                {gameState.alliance && (
+                    <button onClick={() => toggleWindow('alliance')} className="w-14 h-14 rounded bg-stone-900/95 border border-stone-800 shadow-2xl flex items-center justify-center text-2xl transition-all hover:bg-blue-900 group">
+                        <span className="group-hover:scale-110 transition-transform">🤝</span>
+                    </button>
+                )}
+            </div>
+
+            <button onClick={() => setIsSettingsOpen(true)} className="absolute top-6 right-6 z-20 p-3 bg-stone-900/80 hover:bg-stone-800 text-stone-400 rounded-full border border-stone-800 transition-colors shadow-2xl">⚙️</button>
+            
             <EventLog isOpen={activeWindow === 'events'} onClose={() => setActiveWindow('none')} eventQueue={eventQueue} onReadEvent={handleReadEvent} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={handleAddOrder} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={handleGetSuggestions} turn={gameState.turn} />
             <HistoryLog isOpen={activeWindow === 'history'} onClose={() => setActiveWindow('none')} history={fullHistory} />
             <ChatInterface isOpen={activeWindow === 'chat'} onClose={() => setActiveWindow('none')} playerCountry={gameState.playerCountry || "Moi"} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={handleMarkChatRead} />
             {gameState.alliance && <AllianceWindow isOpen={activeWindow === 'alliance'} onClose={() => setActiveWindow('none')} alliance={gameState.alliance} playerCountry={gameState.playerCountry || ""} />}
+            
             {isSettingsOpen && (
-                <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-xl p-6 max-w-xs w-full">
-                        <h3 className="font-bold mb-4">Réglages</h3>
-                        <button onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} className="w-full py-2 mb-2 bg-emerald-600 text-white rounded font-bold">Sauvegarde Cloud</button>
-                        <button onClick={handleExitToDashboard} className="w-full py-2 bg-stone-100 text-stone-600 rounded">Sortir</button>
-                        <button onClick={() => setIsSettingsOpen(false)} className="w-full py-2 mt-4 font-bold border rounded">Fermer</button>
+                <div className="absolute inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-stone-900 border border-stone-800 rounded-xl p-8 max-w-xs w-full shadow-4xl space-y-6">
+                        <h3 className="font-black uppercase tracking-widest text-emerald-500 text-center border-b border-stone-800 pb-4">Système Tactique</h3>
+                        <button onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} className="w-full py-4 bg-emerald-600 text-white rounded font-bold uppercase tracking-widest text-xs hover:bg-emerald-500 transition-colors">Sauvegarder Campagne</button>
+                        <button onClick={handleExitToDashboard} className="w-full py-4 bg-stone-950 border border-stone-800 text-stone-500 hover:text-white rounded font-bold uppercase tracking-widest text-xs transition-colors">Retour au QG</button>
+                        <button onClick={() => setIsSettingsOpen(false)} className="w-full py-2 text-stone-600 hover:text-stone-400 font-bold uppercase tracking-widest text-[9px] transition-colors">Fermer les Réglages</button>
+                    </div>
+                </div>
+            )}
+
+            {/* INITIAL COUNTRY SELECTION MODAL */}
+            {showStartModal && !gameState.playerCountry && (
+                <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-xl flex items-center justify-center p-6 text-center">
+                    <div className="max-w-xl space-y-12">
+                         <div className="space-y-4">
+                            <h2 className="text-4xl font-black uppercase tracking-tighter italic">Choisissez votre Destin</h2>
+                            <p className="text-stone-400 text-sm">Cliquez sur un pays sur la carte ou sélectionnez-en un ci-dessous pour initier la simulation.</p>
+                         </div>
+                         
+                         <div className="bg-stone-900/50 border border-stone-800 p-8 rounded-2xl">
+                             {pendingCountry ? (
+                                 <div className="flex flex-col items-center gap-6 animate-fade-in">
+                                     <img src={getFlagUrl(pendingCountry) || ''} alt="" className="w-24 h-16 object-cover rounded shadow-2xl border-2 border-stone-800" />
+                                     <div className="text-3xl font-black uppercase">{pendingCountry}</div>
+                                     <button onClick={confirmCountrySelection} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded uppercase tracking-widest shadow-xl transition-all transform active:scale-95">Prendre le Commandement</button>
+                                     <button onClick={() => setPendingCountry(null)} className="text-xs text-stone-500 hover:text-white uppercase font-bold tracking-widest">Choisir un autre pays</button>
+                                 </div>
+                             ) : (
+                                 <div className="text-emerald-500 font-black animate-pulse uppercase tracking-[0.2em] text-xs py-10">En attente d'une sélection cartographique...</div>
+                             )}
+                         </div>
                     </div>
                 </div>
             )}
