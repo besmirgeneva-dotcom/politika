@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Schema, Type } from "@google/genai";
-import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel } from "../types";
+import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel, Alliance } from "../types";
 
 // --- CONFIGURATION ---
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -90,14 +90,16 @@ const SYSTEM_INSTRUCTION = `
 ROLE: Tu es le "Moteur de Réalité" de GeoSim, une simulation géopolitique sans complaisance.
 
 RÈGLES DE COMPORTEMENT (CRITIQUE) :
-1. **RÉALISME BRUTAL** : Ne sois pas un simple exécutant des ordres du joueur. Si un ordre est donné, simule sa mise en œuvre RÉELLE. Il y a des imprévus, des trahisons, des échecs logistiques ou des succès inattendus.
-2. **ASYMÉTRIE DE PUISSANCE** : 
-   - Si une nation puissante (Militaire > 70) attaque ou annexe une nation faible, l'annexion militaire doit être FACILE et RAPIDE mais avec des conséquences politiques.
+1. **RÉALISME BRUTAL** : Ne sois pas un simple exécutant des ordres du joueur. Si un ordre est donné, simule sa mise en œuvre RÉELLE.
+2. **ASYMÉTRIE DE PUISSANCE** : Si une nation puissante (Militaire > 70) attaque ou annexe une nation faible, l'annexion militaire doit être FACILE et RAPIDE.
 3. **CARTOGRAPHIE MILITAIRE** : 
-   - Types de marqueurs autorisés UNIQUEMENT : 'build_factory' (usine d'armement/avions), 'build_port' (port militaire), 'build_airport' (base militaire terrestre), 'build_airbase' (base aérienne), 'build_defense' (radar, missiles).
-   - PRÉCISION DU PLACEMENT : Tu dois t'assurer que les coordonnées (lat, lng) fournies sont STRICTEMENT à l'intérieur des frontières du pays concerné. Ne place jamais un point chez un voisin. Vérifie la géographie.
-   - SUPPRESSION : Si le joueur demande de supprimer ou retirer une installation, ou si elle est détruite, utilise 'remove_entity' avec l'ID ou le label concerné.
-4. **AUTONOMIE MONDIALE** : Les autres pays (IA) agissent selon la Realpolitik.
+   - Types de marqueurs autorisés UNIQUEMENT : 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'.
+   - PRÉCISION : Coordonnées STRICTEMENT à l'intérieur des frontières du pays concerné.
+   - SUPPRESSION : Utilise 'remove_entity' pour retirer des installations.
+4. **PROTOCOLE DE COMMUNICATION (STRICT)** :
+   - **FRÉQUENCE FAIBLE** : Ne génère des messages entrants ('incomingMessages') que TRÈS RAREMENT (max 1 par tour, souvent 0). Le silence diplomatique est la norme.
+   - **FILTRE EXPÉDITEUR** : Seuls les membres de l'alliance du joueur (ex: OTAN, UE) ou les Superpuissances (USA, Chine, Russie) en cas de crise majeure peuvent initier un message. Les petits pays n'écrivent JAMAIS sauf s'ils sont directement envahis par le joueur.
+   - **CONTENU** : Pas de politesses inutiles. Uniquement des demandes d'aide, des menaces crédibles ou des informations stratégiques vitales.
 5. **STYLE ÉDITORIAL** : Rapports de renseignement (AFP, Reuters).
 `;
 
@@ -198,16 +200,21 @@ export const simulateTurn = async (
   playerAction: string,
   recentHistory: GameEvent[],
   ownedTerritories: string[] = [],
-  existingEntities: string[] = [],
+  entitiesSummary: string = "", // CHANGEMENT: Reçoit une string résumée au lieu d'un tableau
   isLandlocked: boolean = false,
   hasNuclear: boolean = false,
   diplomaticContext: string = "",
   chaosLevel: ChaosLevel = 'normal',
   provider: AIProvider = 'gemini',
-  playerPower: number = 50 // Ajouté pour le calcul d'asymétrie
+  playerPower: number = 50,
+  alliance: Alliance | null = null
 ): Promise<SimulationResponse> => {
   
+  // STRATEGIE 3 : COMPRESSION HISTORIQUE
+  // On ne garde que les dates et les titres, on supprime les descriptions
   const historyContext = recentHistory.slice(-15).map(e => `[${e.date}] ${e.type.toUpperCase()}: ${e.headline}`).join('\n');
+  
+  const allianceContext = alliance ? `MEMBRE DE: ${alliance.name} (Leader: ${alliance.leader}). ALLIÉS: ${alliance.members.join(', ')}` : "NON-ALIGNÉ";
   
   const prompt = `
     --- ETAT DE LA SIMULATION ---
@@ -215,21 +222,24 @@ export const simulateTurn = async (
     PAYS JOUEUR: ${playerCountry} (Puissance Militaire: ${playerPower}/100)
     POSSESSIONS: ${ownedTerritories.join(', ')}
     CHAOS: ${chaosLevel}
+    ALLIANCE: ${allianceContext}
     
     ACTION DU JOUEUR (A TRAITER): "${playerAction || "Maintien de l'ordre."}"
     
-    HISTORIQUE RECENT:
+    HISTORIQUE RECENT (Titres uniquement):
     ${historyContext}
 
-    INSTALLATIONS ACTUELLES: ${existingEntities.join(', ')}
+    INSTALLATIONS ACTUELLES (Résumé): 
+    ${entitiesSummary || "Aucune infrastructure majeure."}
 
     DIPLOMATIE ACTUELLE: ${diplomaticContext}
 
     CONSIGNES DE SIMULATION :
     1. Traite l'ordre du joueur avec nuance.
-    2. Respecte les types d'entités demandés. Pour les suppressions, utilise 'remove_entity'.
-    3. ASSURE-TOI QUE LES COORDONNÉES DES NOUVELLES INSTALLATIONS SONT BIEN DANS LE PAYS CIBLE. Ne place rien chez le voisin.
-    4. Le monde continue de tourner : produis au moins 2 événements majeurs.
+    2. Respecte les types d'entités demandés ('remove_entity' pour suppression).
+    3. COORDONNÉES: STRICTEMENT dans le pays cible.
+    4. MESSAGES: TRES RAREMENT. Seulement si CRITIQUE, et seulement de la part des ALLIÉS (${alliance ? alliance.members.join(', ') : 'Aucun'}) ou des SUPERPUISSANCES.
+    5. Produis au moins 2 événements majeurs.
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
@@ -250,35 +260,86 @@ export const simulateTurn = async (
   } catch (error) { return getFallbackResponse(); }
 };
 
+// --- NOUVEAU: BATCHING POUR LE CHAT DIPLOMATIQUE ---
 export const sendDiplomaticMessage = async (
     playerCountry: string,
-    responder: string,
-    groupParticipants: string[],
+    targets: string[], // On reçoit maintenant un tableau
     message: string,
     history: ChatMessage[],
-    context: { militaryPower: number; economyHealth: number; globalTension: number; hasNuclear: boolean; },
+    context: { 
+        militaryPower: number; 
+        economyHealth: number; 
+        globalTension: number; 
+        hasNuclear: boolean; 
+        playerAllies: string[]; // Ajout de la liste des alliés pour la logique d'annexion
+    },
     provider: AIProvider = 'gemini'
-): Promise<string | null> => {
+): Promise<{ sender: string, text: string }[]> => { // Retourne un tableau de réponses
+    
+    // Compression du contexte de conversation (Derniers messages pertinents)
     const conversationContext = history
-        .filter(msg => msg.targets.includes(responder) || groupParticipants.includes(msg.senderName))
+        .filter(msg => targets.includes(msg.senderName) || (msg.sender === 'player' && msg.targets.some(t => targets.includes(t))))
         .slice(-6)
         .map(msg => `${msg.sender === 'player' ? playerCountry : msg.senderName}: ${msg.text}`)
         .join('\n');
 
-    const prompt = `Tu es le dirigeant de ${responder}. ${playerCountry} te dit : "${message}". Contexte : ${conversationContext}. Réponds de manière stratégique et concise. Si tu es offensé ou menacé, réagis en conséquence selon ta puissance par rapport à eux (Puissance Joueur: ${context.militaryPower}).`;
+    const prompt = `
+    Tu incarnes les dirigeants de ces pays : ${targets.join(', ')}.
+    
+    CONTEXTE :
+    - Expéditeur : ${playerCountry} (Puissance: ${context.militaryPower}/100, Nucléaire: ${context.hasNuclear ? "OUI" : "NON"}).
+    - Tes Alliés : ${context.playerAllies.join(', ')}.
+    - Historique Conversation : 
+    ${conversationContext}
+    
+    MESSAGE REÇU : "${message}"
+
+    CONSIGNES DE RÉPONSE :
+    1. Chaque pays ciblé doit décider s'il répond ou reste silencieux (pour éviter le spam).
+    2. Si le message ne concerne pas directement un pays ou n'est pas intéressant, NE RÉPONDS PAS pour ce pays.
+    
+    RÈGLE SPÉCIALE ANNEXION (CRITIQUE) :
+    - Si le joueur demande l'annexion ("annexation", "rejoindre", "fusionner") à un pays qui est son ALLIÉ et qui est plus FAIBLE :
+      NE REFUSE PAS DIRECTEMENT. Montre de l'intérêt mais EXIGE des conditions : "Quelles garanties pour notre peuple ?", "Nous voulons préserver notre culture", "Quel statut aurons-nous ?".
+    - Si le pays n'est PAS allié ou est PUISSANT : Refuse fermement ("Jamais !", "C'est une déclaration de guerre ?").
+
+    FORMAT DE SORTIE JSON UNIQUEMENT :
+    [
+      { "sender": "NomDuPays", "text": "Sa réponse..." },
+      ...
+    ]
+    Si personne ne répond, renvoie [].
+    `;
+
+    const CHAT_SCHEMA = {
+        type: "array",
+        items: {
+            type: "object",
+            properties: {
+                sender: { type: "string" },
+                text: { type: "string" }
+            },
+            required: ["sender", "text"]
+        }
+    };
 
     if (provider === 'groq' && GROQ_API_KEY) {
         try {
-            const text = await callGroq(prompt, "Tu es un chef d'état réaliste. Réponds directement.", false);
-            return text.trim() === "NO_RESPONSE" ? null : text;
+            const jsonStr = await callGroq(prompt, "Tu es un collectif de chefs d'états. JSON Only.", true, CHAT_SCHEMA);
+            return JSON.parse(jsonStr);
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
     }
     
     try {
-        const response = await generateRobustContent(prompt, { temperature: 0.7 });
-        const text = response.text?.trim();
-        return text === "NO_RESPONSE" ? null : text || "Reçu.";
-    } catch (e) { return "Transmission diplomatique reçue."; }
+        const response = await generateRobustContent(prompt, { 
+            responseMimeType: "application/json",
+            responseSchema: CHAT_SCHEMA as any,
+            temperature: 0.7 
+        });
+        return JSON.parse(response.text) || [];
+    } catch (e) { 
+        return [{ sender: targets[0], text: "Transmission reçue. Analyse en cours." }]; 
+    }
 }
 
 const getFallbackResponse = (): SimulationResponse => ({
@@ -292,6 +353,7 @@ export const getStrategicSuggestions = async (
     recentHistory: GameEvent[],
     provider: AIProvider = 'gemini'
 ): Promise<string[]> => {
+    // Compression historique ici aussi
     const historyContext = recentHistory.slice(-5).map(e => e.headline).join('\n');
     const prompt = `Suggère 3 actions machiavéliques ou diplomatiques pour ${playerCountry} sachant que : ${historyContext}. Format JSON: {"suggestions": ["..."]}`;
     try {

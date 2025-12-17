@@ -67,6 +67,18 @@ const hasSpaceProgramInitial = (country: string): boolean => {
     return SPACE_POWERS.some(c => country.includes(c));
 }
 
+// Token saving: Map readable type to short string
+const getShortEntityName = (t: MapEntityType) => {
+    switch(t) {
+        case 'military_factory': return 'Usine';
+        case 'military_port': return 'Port';
+        case 'military_base': return 'Base';
+        case 'airbase': return 'Air';
+        case 'defense_system': return 'Défense';
+        default: return 'Autre';
+    }
+}
+
 // --- LOGO COMPONENT ---
 const GameLogo = ({ size = 'large', theme = 'dark' }: { size?: 'small' | 'large', theme?: 'dark' | 'light' }) => {
     const isLight = theme === 'light';
@@ -541,7 +553,7 @@ const App: React.FC = () => {
       return await getStrategicSuggestions(gameState.playerCountry, fullHistory, aiProvider);
   }
 
-  // --- DIPLOMATIC CHAT HANDLER ---
+  // --- DIPLOMATIC CHAT HANDLER (UPDATED FOR BATCHING) ---
   const handleSendChatMessage = async (targets: string[], message: string) => {
       if (!gameState.playerCountry) return;
 
@@ -566,43 +578,42 @@ const App: React.FC = () => {
           militaryPower: gameState.militaryPower,
           economyHealth: gameState.economyHealth,
           globalTension: gameState.globalTension,
-          hasNuclear: gameState.hasNuclear
+          hasNuclear: gameState.hasNuclear,
+          playerAllies: gameState.alliance ? gameState.alliance.members : [] // Ajout des alliés au contexte
       };
       const updatedHistoryForContext = [...gameState.chatHistory, userMsg];
 
       try {
-        const aiPromises = targets.map(async (targetCountry) => {
-            const responseText = await sendDiplomaticMessage(
-                gameState.playerCountry!,
-                targetCountry, 
-                targets, 
-                message,
-                updatedHistoryForContext,
-                context,
-                aiProvider
-            );
-            setTypingParticipants(prev => prev.filter(p => p !== targetCountry));
-            if (!responseText) return null;
-            return {
-                id: `msg-${Date.now()}-${targetCountry}`,
-                sender: 'ai',
-                senderName: targetCountry,
-                targets: targets, 
-                text: responseText,
-                timestamp: Date.now() + Math.floor(Math.random() * 500),
-                isRead: false 
-            } as ChatMessage;
-        });
+        // STRATEGIE 1: BATCHING (Token Saving)
+        // On envoie une seule requête pour tous les destinataires, au lieu de map()
+        const aiResponses = await sendDiplomaticMessage(
+            gameState.playerCountry!,
+            targets,
+            message,
+            updatedHistoryForContext,
+            context,
+            aiProvider
+        );
 
-        const aiResponses = await Promise.all(aiPromises);
-        const validResponses = aiResponses.filter(r => r !== null) as ChatMessage[];
+        const newMessages: ChatMessage[] = aiResponses.map(resp => ({
+            id: `msg-${Date.now()}-${resp.sender}`,
+            sender: 'ai',
+            senderName: resp.sender,
+            targets: targets,
+            text: resp.text,
+            timestamp: Date.now() + Math.floor(Math.random() * 500),
+            isRead: false
+        }));
+
+        setTypingParticipants([]);
 
         setGameState(prev => ({
             ...prev,
             isProcessing: false,
-            chatHistory: [...prev.chatHistory, ...validResponses]
+            chatHistory: [...prev.chatHistory, ...newMessages]
         }));
-        if (validResponses.length > 0) {
+        
+        if (newMessages.length > 0) {
             setHasUnreadChat(true);
         }
 
@@ -656,7 +667,23 @@ const App: React.FC = () => {
 
     setGameState(prev => ({ ...prev, isProcessing: true }));
 
-    const entityDesc = gameState.mapEntities.map(e => `${e.label || e.type} en ${e.country}`);
+    // STRATÉGIE 2 : AGRÉGATION DES ENTITÉS (Token Saving)
+    // Au lieu d'envoyer la liste brute de 50 usines, on envoie un résumé.
+    const summaryMap: Record<string, Record<string, number>> = {};
+    gameState.mapEntities.forEach(ent => {
+        if (!summaryMap[ent.country]) summaryMap[ent.country] = {};
+        const label = getShortEntityName(ent.type);
+        summaryMap[ent.country][label] = (summaryMap[ent.country][label] || 0) + 1;
+    });
+    
+    // Construction de la string résumée : "France: 5 Usine, 2 Port; Allemagne: 1 Base"
+    const entitiesSummary = Object.entries(summaryMap).map(([country, counts]) => {
+        const countsStr = Object.entries(counts)
+            .map(([type, count]) => `${count} ${type}`)
+            .join(', ');
+        return `${country}: ${countsStr}`;
+    }).join('; ');
+
     const isLandlocked = isCountryLandlocked(gameState.playerCountry);
     const recentChat = gameState.chatHistory.slice(-10).map(m => `${m.sender === 'player' ? 'Joueur' : m.senderName}: ${m.text}`).join(' | ');
 
@@ -666,12 +693,14 @@ const App: React.FC = () => {
         finalOrderString,
         gameState.events,
         gameState.ownedTerritories,
-        entityDesc,
+        entitiesSummary, // Passage du résumé au lieu du tableau brut
         isLandlocked,
         gameState.hasNuclear,
         recentChat,
         gameState.chaosLevel,
-        aiProvider
+        aiProvider,
+        gameState.militaryPower,
+        gameState.alliance
     );
 
     const nextDate = new Date(gameState.currentDate);
