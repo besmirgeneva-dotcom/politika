@@ -99,13 +99,13 @@ RÈGLES D'OR POUR L'IA (CRITIQUE):
    - Tu DOIS traiter l'ordre du joueur ("playerAction").
    - Si le joueur construit ou déploie, utilise "mapUpdates".
 
-2. **GÉOGRAPHIE & DÉPLOIEMENT MILITAIRE (CRITIQUE)**:
-   - **Déploiement Général**: Si le joueur dit "Déployer troupes en Allemagne" (sans ville), utilise 'troop_deployment' avec les coordonnées centrales du pays. Label: "Contingent militaire [PaysJoueur]".
-   - **Déploiement Précis**: Si le joueur dit "Déployer troupes à Berlin" (avec ville), utilise 'troop_deployment' avec les coordonnées PRÉCISES de la ville. Label: "Contingent militaire [PaysJoueur]".
-   - **Bases & Radars**: Pour 'build_base' ou 'build_defense', si le joueur donne un nom (ex: "Radar Zeus"), mets-le dans 'label'. Sinon label par défaut.
+2. **GÉOGRAPHIE & DÉPLOIEMENT MILITAIRE (CRITIQUE - ZÉRO ERREUR)**:
+   - **Déploiement Général**: Si le joueur ne précise pas de ville/lieu exact (ex: "Armée en Pologne"), METS IMPÉRATIVEMENT \`lat: 0\` et \`lng: 0\`. Le moteur de jeu placera alors automatiquement le point au centre géométrique exact du pays. C'est la seule façon d'éviter les erreurs.
+   - **Déploiement Frontalier**: Si le joueur vise une frontière (ex: "Frontière France-Espagne"), place le point LÉGÈREMENT à l'intérieur du pays propriétaire de l'unité (ex: France). Ne le place JAMAIS pile sur la ligne ou chez le voisin (Espagne), pour éviter les confusions visuelles. Reste prudent.
+   - **Déploiement Précis (Ville)**: Si une ville est citée, sois précis mais vérifie que les coordonnées sont bien DANS le pays.
 
-3. **FRONTIÈRES**:
-   - Si le joueur vise une frontière (ex: Frontière Albanie-Kosovo), place le point exactement sur la ligne.
+3. **PRÉCISION DES POSSESSIONS**:
+   - Ne place jamais une base du joueur dans un pays qu'il ne contrôle pas (sauf invasion explicite).
 
 Format de réponse attendu : JSON UNIQUEMENT.
 `;
@@ -296,6 +296,7 @@ export const simulateTurn = async (
        - Tu DOIS inclure un événement de type "player" en première position.
        - Cet événement doit décrire le résultat de l'ordre "${playerAction}".
        - Si le joueur construit ou déploie des troupes, tu DOIS ajouter un élément dans "mapUpdates".
+       - **RAPPEL GEO CRITIQUE**: Utilise TOUJOURS \`lat: 0, lng: 0\` pour un déploiement général (centre du pays). Pour une frontière, place le point nettement à l'intérieur du pays pour éviter de déborder chez le voisin.
     
     2. **Simuler le Reste du Monde**: Génère ensuite des événements qui n'impliquent PAS le joueur.
     3. **Définir le Temps**: Choisis 'day' si urgence/guerre, 'month' si tensions, 'year' si calme.

@@ -409,8 +409,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     };
   };
 
-  // Affichage des étiquettes des marqueurs (points) uniquement au zoom max (8)
-  const showMarkerLabels = zoom >= 8;
+  // Affichage des étiquettes des marqueurs (points) uniquement au zoom max (10)
+  const showMarkerLabels = zoom >= 10;
 
   // --- LOGIC: GROUP ENTITIES BY POSITION ---
   const groupedEntities = useMemo(() => {
@@ -445,7 +445,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
   return (
     <div className="w-full h-full absolute inset-0 z-0 bg-stone-900">
       <MapContainer 
-        center={[20, 0]} zoom={3} scrollWheelZoom={true} minZoom={2} maxZoom={8}
+        center={[20, 0]} zoom={3} scrollWheelZoom={true} minZoom={2} maxZoom={10}
         maxBounds={[[-90, -180], [90, 180]]} zoomControl={false} attributionControl={false}
         className="outline-none bg-stone-900 h-full w-full"
       >
@@ -458,7 +458,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
 
         <MapLabels zoom={zoom} visibleCountries={centers} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
 
-        {zoom >= 8 && groupedEntities.map((group, idx) => {
+        {zoom >= 10 && groupedEntities.map((group, idx) => {
             const count = group.entities.length;
             const primaryEntity = group.entities[0];
             const color = getEntityColor(primaryEntity.type); // Color of the first, or logic for mixed

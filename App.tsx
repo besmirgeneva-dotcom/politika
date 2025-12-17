@@ -807,6 +807,7 @@ const App: React.FC = () => {
                             </div>
                         </div>
                         <div className="pt-4 border-t border-stone-200 flex flex-col gap-2">
+                            <button onClick={() => setIsSettingsOpen(false)} className="w-full py-3 bg-stone-800 text-white font-bold rounded-lg shadow hover:bg-stone-700">▶ Reprendre</button>
                             <button onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} className="w-full py-3 text-white font-bold rounded-lg shadow flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500">☁️ Sauvegarder (Cloud)</button>
                             <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow">Charger une partie</button>
                             <button onClick={handleExitToDashboard} className="w-full py-3 bg-stone-200 text-stone-600 font-bold rounded-lg">Quitter vers Tableau de bord</button>
