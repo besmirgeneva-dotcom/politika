@@ -234,6 +234,17 @@ const callOpenAICompatible = async (
     }
 };
 
+// Validation du modèle HF
+const validateHFModel = (model: string | undefined): string => {
+    if (!model) return "mistralai/Mistral-7B-Instruct-v0.3";
+    const m = model.trim().toLowerCase();
+    // Si l'utilisateur a rentré "hugging face" ou quelque chose avec des espaces qui n'est pas un ID valide
+    if (m === "hugging face" || m.includes(" ") || !m.includes("/")) {
+        return "mistralai/Mistral-7B-Instruct-v0.3";
+    }
+    return model.trim();
+};
+
 export const simulateTurn = async (
   playerCountry: string,
   currentDate: string,
@@ -289,9 +300,7 @@ export const simulateTurn = async (
   // --- HUGGING FACE ROUTING ---
   if (provider === 'huggingface' && customApiKey) {
       try {
-          // Utilisation d'un modèle par défaut solide si aucun n'est spécifié
-          // "mistralai/Mistral-7B-Instruct-v0.3" est un bon compromis gratuit/logique
-          const modelToUse = customModel || "mistralai/Mistral-7B-Instruct-v0.3";
+          const modelToUse = validateHFModel(customModel);
           // Endpoint compatible OpenAI pour HF
           const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
           const jsonStr = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, SYSTEM_INSTRUCTION, customApiKey, true));
@@ -446,7 +455,7 @@ export const sendDiplomaticMessage = async (
     // Hugging Face
     if (provider === 'huggingface' && customApiKey) {
         try {
-            const modelToUse = customModel || "mistralai/Mistral-7B-Instruct-v0.3";
+            const modelToUse = validateHFModel(customModel);
             const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
             const text = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, "Tu es un chef d'état. Réponds directement.", customApiKey, false));
             return text.trim() === "NO_RESPONSE" ? null : text;
@@ -516,7 +525,7 @@ export const getStrategicSuggestions = async (
     // Hugging Face
     if (provider === 'huggingface' && customApiKey) {
         try {
-            const modelToUse = customModel || "mistralai/Mistral-7B-Instruct-v0.3";
+            const modelToUse = validateHFModel(customModel);
             const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
             const json = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, "Conseiller stratégique. JSON.", customApiKey, true));
             const p = JSON.parse(json);

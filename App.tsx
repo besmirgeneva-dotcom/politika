@@ -770,7 +770,7 @@ const App: React.FC = () => {
                   </div>
               </main>
               {showBugReportModal && (<div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-slate-200 animate-fade-in-up"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold text-red-600 flex items-center gap-2"><span>🐞</span> Signaler un bug</h3><button onClick={() => setShowBugReportModal(false)} className="text-slate-400 hover:text-slate-600 font-bold">✕</button></div><div className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Titre</label><input type="text" className="w-full p-2 rounded-lg border border-slate-300 bg-slate-50 text-sm" value={bugTitle} onChange={(e) => setBugTitle(e.target.value)}/></div><div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Description</label><textarea className="w-full p-2 rounded-lg border border-slate-300 bg-slate-50 text-sm h-32 resize-none" value={bugDescription} onChange={(e) => setBugDescription(e.target.value)}/></div><button onClick={handleSendBugReport} disabled={isSendingBug} className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-md">{isSendingBug ? 'Envoi...' : 'Envoyer'}</button></div></div></div>)}
-              {notification && (<div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-[60] animate-fade-in-down text-sm font-bold flex items-center gap-2"><span className="text-emerald-400">✓</span> {notification}</div>)}
+              {notification && (<div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2"><span className="text-emerald-400">✓</span> {notification}</div>)}
           </div>
       );
   }
@@ -882,7 +882,7 @@ const App: React.FC = () => {
                             </p>
                         </div>
 
-                        {/* NEW: CUSTOM MODEL FIELD */}
+                        {/* NEW: CUSTOM MODEL FIELD WITH QUICK SELECT */}
                         <div>
                             <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Nom du Modèle (Optionnel)</label>
                             <input 
@@ -890,8 +890,21 @@ const App: React.FC = () => {
                                 value={tempModel}
                                 onChange={(e) => setTempModel(e.target.value)}
                                 placeholder="ex: mistralai/Mistral-7B-Instruct-v0.3"
-                                className="w-full p-3 rounded-lg border border-stone-300 focus:outline-blue-500 bg-stone-50 text-sm font-mono"
+                                className="w-full p-3 rounded-lg border border-stone-300 focus:outline-blue-500 bg-stone-50 text-sm font-mono mb-2"
                             />
+                            
+                            {/* Suggestions uniquement pour Hugging Face */}
+                            {(tempKey.startsWith('hf_')) && (
+                                <div className="bg-blue-50 border border-blue-100 p-2 rounded-lg">
+                                    <div className="text-[10px] font-bold text-blue-600 uppercase mb-1">Modèles Recommandés (Gratuits)</div>
+                                    <div className="flex flex-wrap gap-1">
+                                        <button onClick={() => setTempModel('mistralai/Mistral-7B-Instruct-v0.3')} className="bg-white border border-blue-200 text-blue-700 px-2 py-1 rounded text-[10px] hover:bg-blue-100">Mistral 7B</button>
+                                        <button onClick={() => setTempModel('Qwen/Qwen2.5-72B-Instruct')} className="bg-white border-purple-200 text-purple-700 px-2 py-1 rounded text-[10px] hover:bg-purple-100">Qwen 2.5 (Puissant)</button>
+                                        <button onClick={() => setTempModel('microsoft/Phi-3-mini-4k-instruct')} className="bg-white border-green-200 text-green-700 px-2 py-1 rounded text-[10px] hover:bg-green-100">Phi-3 (Rapide)</button>
+                                    </div>
+                                </div>
+                            )}
+
                             <p className="text-[10px] text-stone-400 mt-1 italic">
                                 Laissez vide pour utiliser le modèle par défaut du fournisseur.
                             </p>
