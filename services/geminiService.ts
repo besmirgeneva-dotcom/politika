@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel } from "../types";
 
@@ -46,7 +47,6 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
 
         if (retries > 0 && (isRateLimit || isServerOverload)) {
             console.warn(`API Busy/Overloaded. Retrying in ${delay}ms... (${retries} attempts left)`);
-            // Add jitter
             const jitter = Math.random() * 500;
             await new Promise(r => setTimeout(r, delay + jitter));
             return withRetry(fn, retries - 1, delay * 2);
@@ -60,19 +60,16 @@ const generateRobustContent = async (
     prompt: string, 
     config: any
 ): Promise<any> => {
-    // 1. Try Primary Model (Flash 2.5)
     try {
         return await withRetry(async () => {
             return await ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: "gemini-3-flash-preview",
                 contents: prompt,
                 config: config
             });
         }, 3, 2000);
     } catch (error) {
-        console.warn("Primary model (Flash 2.5) failed. Switching to fallback (Flash Lite)...", error);
-        
-        // 2. Try Fallback Model (Flash Lite)
+        console.warn("Primary model failed. Switching to fallback...", error);
         try {
             return await withRetry(async () => {
                 return await ai.models.generateContent({
@@ -90,32 +87,17 @@ const generateRobustContent = async (
 
 // --- INSTRUCTIONS UNIFIÉES ET RENFORCÉES ---
 const SYSTEM_INSTRUCTION = `
-ROLE: Tu es le "Moteur de Réalité" d'une simulation géopolitique complexe (GeoSim).
-CONTEXTE: Jeu vidéo de stratégie "Grand Strategy".
-OBJECTIF: Simuler un monde VIVANT, AUTONOME et COHÉRENT.
+ROLE: Tu es le "Moteur de Réalité" de GeoSim, une simulation géopolitique sans complaisance.
 
-RÈGLES D'OR POUR L'IA (CRITIQUE):
-1. **AUTONOMIE TOTALE DES PNJs**:
-   - Tu contrôles les 195 autres pays. Ils ont leurs propres intérêts.
-   - ILS N'ATTENDENT PAS LE JOUEUR. Ils signent des traités, déclenchent des guerres et des crises économiques ENTRE EUX.
-   - Si le joueur ne fait rien, le monde doit quand même évoluer (et souvent sombrer dans le chaos).
-
-2. **LE JOUEUR N'EST PAS DIEU**:
-   - Si le joueur ordonne une action irréaliste (ex: Le Luxembourg annexe la Chine), l'action DOIT ÉCHOUER avec des conséquences désastreuses.
-   - Ne sois pas complaisant. Oppose une résistance diplomatique et militaire logique.
-
-3. **GÉNÉRATION D'ÉVÉNEMENTS**:
-   - À CHAQUE TOUR, génère au moins 1 ou 2 événements majeurs ("world" ou "crisis") qui n'impliquent PAS le joueur.
-   - Exemples: "Coup d'État au Nigeria", "Crash boursier à Tokyo", "Tensions frontalières Inde-Pakistan".
-
-4. **TON ET STYLE**:
-   - Style journalistique ou dépêche diplomatique. Précis, froid, impactant.
-   - Utilise les noms français exacts des pays.
-
-Format de réponse attendu : JSON UNIQUEMENT.
+RÈGLES DE COMPORTEMENT (CRITIQUE) :
+1. **RÉALISME BRUTAL** : Ne sois pas un simple exécutant des ordres du joueur. Si un ordre est donné, simule sa mise en œuvre RÉELLE. Il y a des imprévus, des trahisons, des échecs logistiques ou des succès inattendus.
+2. **ASYMÉTRIE DE PUISSANCE** : 
+   - Si une nation puissante (Militaire > 70) attaque ou annexe une nation faible (ex: petit pays en développement, micro-état), l'annexion militaire doit être FACILE et RAPIDE. 
+   - Cependant, la difficulté se déplace : l'annexion doit générer une forte instabilité interne (insurrections), une chute de popularité et une condamnation internationale massive (hausse de la Tension Mondiale).
+3. **AUTONOMIE MONDIALE** : Les autres pays (IA) agissent selon la Realpolitik. Ils forment des coalitions contre le joueur s'il devient trop agressif.
+4. **STYLE ÉDITORIAL** : Tes descriptions doivent ressembler à des rapports de renseignement ou des breaking news de grandes agences (AFP, Reuters). Pas de ton "jeu vidéo" générique.
 `;
 
-// Schema definition for Groq (JSON)
 const RESPONSE_SCHEMA_JSON = {
     type: "object",
     properties: {
@@ -181,49 +163,29 @@ const RESPONSE_SCHEMA_JSON = {
       required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
 };
 
-// --- GROQ HELPER ---
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
     try {
-        if (!GROQ_API_KEY) {
-            throw new Error("Clé API Groq manquante.");
-        }
-
+        if (!GROQ_API_KEY) throw new Error("Clé API Groq manquante.");
         let systemContent = system;
         if (jsonMode) {
              const schemaToUse = schema || RESPONSE_SCHEMA_JSON;
-             // Llama 3 needs strong JSON reinforcement
-             systemContent += "\n\nCRITIQUE: TU DOIS REPONDRE UNIQUEMENT AVEC UN JSON VALIDE. PAS DE MARKDOWN (```json). PAS DE COMMENTAIRES.\nSCHEMA OBLIGATOIRE:\n" + JSON.stringify(schemaToUse);
+             systemContent += "\n\nCRITIQUE: REPONDS UNIQUEMENT EN JSON VALIDE. SCHEMA:\n" + JSON.stringify(schemaToUse);
         }
-
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
-            headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                "Content-Type": "application/json"
-            },
+            headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-                messages: [
-                    { role: "system", content: systemContent },
-                    { role: "user", content: prompt }
-                ],
+                messages: [{ role: "system", content: systemContent }, { role: "user", content: prompt }],
                 model: "llama-3.3-70b-versatile",
-                temperature: 0.75, // Increased slightly for more creativity/chaos
+                temperature: 0.85,
                 max_tokens: 2048,
                 response_format: jsonMode ? { type: "json_object" } : undefined
             })
         });
-        
-        if (!response.ok) {
-            const errData = await response.json();
-            throw new Error(`Groq API Error ${response.status}: ${JSON.stringify(errData)}`);
-        }
-        
+        if (!response.ok) throw new Error(`Groq API Error ${response.status}`);
         const data = await response.json();
         return data.choices[0]?.message?.content || "";
-    } catch (e) {
-        console.error("Groq execution failed:", e);
-        throw e;
-    }
+    } catch (e) { throw e; }
 };
 
 export const simulateTurn = async (
@@ -237,131 +199,49 @@ export const simulateTurn = async (
   hasNuclear: boolean = false,
   diplomaticContext: string = "",
   chaosLevel: ChaosLevel = 'normal',
-  provider: AIProvider = 'gemini'
+  provider: AIProvider = 'gemini',
+  playerPower: number = 50 // Ajouté pour le calcul d'asymétrie
 ): Promise<SimulationResponse> => {
   
   const historyContext = recentHistory.slice(-15).map(e => `[${e.date}] ${e.type.toUpperCase()}: ${e.headline}`).join('\n');
   
-  let chaosInstruction = "";
-  if (chaosLevel === 'peaceful') chaosInstruction = "MODE PACIFIQUE: Guerre interdite.";
-  if (chaosLevel === 'normal') chaosInstruction = "MODE STANDARD: Équilibre réaliste.";
-  if (chaosLevel === 'high') chaosInstruction = "MODE HAUTE TENSION: Crises fréquentes.";
-  if (chaosLevel === 'chaos') chaosInstruction = "MODE APOCALYPSE: Guerre totale.";
-
   const prompt = `
-    CONTEXTE SIMULATION (FICTION):
-    DATE ACTUELLE: ${currentDate}
-    PAYS DU JOUEUR: ${playerCountry}
+    --- ETAT DE LA SIMULATION ---
+    DATE: ${currentDate}
+    PAYS JOUEUR: ${playerCountry} (Puissance Militaire: ${playerPower}/100)
     POSSESSIONS: ${ownedTerritories.join(', ')}
-    NIVEAU DE CHAOS: ${chaosInstruction}
+    CHAOS: ${chaosLevel}
     
-    ACTION DU JOUEUR (ORDRES): "${playerAction || "Gouvernance standard. Maintien du statu quo."}"
+    ACTION DU JOUEUR (A TRAITER): "${playerAction || "Maintien de l'ordre."}"
     
-    CONTEXTE HISTORIQUE RÉCENT:
+    HISTORIQUE RECENT:
     ${historyContext}
 
-    TES MISSIONS POUR CE TOUR:
-    1. **Juger l'action du joueur**: Est-elle possible ? Est-elle intelligente ? Si c'est stupide, fais-la échouer (baisse économie/popularité).
-    2. **Simuler le Reste du Monde**: Génère des événements qui n'impliquent PAS le joueur. Fais bouger les lignes entre les USA, la Russie, la Chine, l'Europe, etc.
-    3. **Définir le Temps**: Choisis 'day' si urgence/guerre, 'month' si tensions, 'year' si calme.
-    4. **Conséquences**: Mets à jour les stats (Tension, Économie, Corruption) de façon punitive si nécessaire.
-    
-    Sois créatif. Surprends le joueur. Ne sois pas passif.
+    DIPLOMATIE ACTUELLE: ${diplomaticContext}
+
+    CONSIGNES DE SIMULATION :
+    1. Traite l'ordre du joueur avec nuance. Ne le valide pas bêtement. Si le joueur veut annexer un pays beaucoup plus faible, l'annexion RÉUSSIT militairement mais déclenche des sanctions et de la guérilla.
+    2. Si l'ordre est complexe (ex: réforme économique), décris les effets secondaires (inflation, mécontentement, ou croissance explosive).
+    3. Le monde continue de tourner : produis au moins 2 événements majeurs impliquant d'autres grandes puissances (USA, Chine, Russie, UE).
+    4. Sois imprévisible : introduis des variables aléatoires (catastrophes, découvertes, scandales).
   `;
 
-  // Gemini Schema
-  const geminiSchema: Schema = {
-      type: Type.OBJECT,
-      properties: {
-      timeIncrement: { type: Type.STRING, enum: ["day", "month", "year"] },
-      events: {
-          type: Type.ARRAY,
-          items: {
-          type: Type.OBJECT,
-          properties: {
-              type: { type: Type.STRING, enum: ["world", "crisis", "economy", "war", "alliance"] },
-              headline: { type: Type.STRING },
-              description: { type: Type.STRING },
-              relatedCountry: { type: Type.STRING }
-          },
-          required: ["type", "headline", "description"]
-          },
-      },
-      globalTensionChange: { type: Type.INTEGER },
-      economyHealthChange: { type: Type.INTEGER },
-      militaryPowerChange: { type: Type.INTEGER },
-      popularityChange: { type: Type.INTEGER },
-      corruptionChange: { type: Type.INTEGER },
-      spaceProgramActive: { type: Type.BOOLEAN },
-      mapUpdates: {
-          type: Type.ARRAY,
-          items: {
-              type: Type.OBJECT,
-              properties: {
-                  type: { type: Type.STRING, enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'] },
-                  targetCountry: { type: Type.STRING },
-                  newOwner: { type: Type.STRING },
-                  lat: { type: Type.NUMBER },
-                  lng: { type: Type.NUMBER },
-                  label: { type: Type.STRING }
-              },
-              required: ['type', 'targetCountry']
-          }
-      },
-      incomingMessages: {
-          type: Type.ARRAY,
-          items: {
-              type: Type.OBJECT,
-              properties: {
-                  sender: { type: Type.STRING },
-                  text: { type: Type.STRING },
-                  targets: { type: Type.ARRAY, items: { type: Type.STRING } }
-              },
-              required: ["sender", "text", "targets"]
-          }
-      },
-      allianceUpdate: {
-          type: Type.OBJECT,
-          properties: {
-              action: { type: Type.STRING, enum: ["create", "update", "dissolve"] },
-              name: { type: Type.STRING },
-              type: { type: Type.STRING },
-              members: { type: Type.ARRAY, items: { type: Type.STRING } },
-              leader: { type: Type.STRING }
-          },
-          required: ["action"]
-      }
-      },
-      required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
-  };
-
-  if (provider === 'groq') {
-      if (GROQ_API_KEY) {
-          try {
-              const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, RESPONSE_SCHEMA_JSON);
-              return JSON.parse(jsonStr) as SimulationResponse;
-          } catch (error) {
-              console.warn("Groq failed, fallback to Gemini.", error);
-          }
-      } else {
-          console.warn("Groq Key missing. Fallback Gemini.");
-      }
+  if (provider === 'groq' && GROQ_API_KEY) {
+      try {
+          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, RESPONSE_SCHEMA_JSON);
+          return JSON.parse(jsonStr) as SimulationResponse;
+      } catch (error) { console.warn("Groq failed, fallback to Gemini."); }
   } 
   
   try {
       const response = await generateRobustContent(prompt, {
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
-          responseSchema: geminiSchema,
-          temperature: chaosLevel === 'chaos' ? 0.95 : 0.8, // Increased temperature for Gemini too
+          responseSchema: RESPONSE_SCHEMA_JSON as any,
+          temperature: 0.85,
       });
-      const text = response.text;
-      if (!text) throw new Error("No AI response");
-      return JSON.parse(text) as SimulationResponse;
-  } catch (error) {
-      console.error("Gemini Critical Error:", error);
-      return getFallbackResponse();
-  }
+      return JSON.parse(response.text) as SimulationResponse;
+  } catch (error) { return getFallbackResponse(); }
 };
 
 export const sendDiplomaticMessage = async (
@@ -373,61 +253,32 @@ export const sendDiplomaticMessage = async (
     context: { militaryPower: number; economyHealth: number; globalTension: number; hasNuclear: boolean; },
     provider: AIProvider = 'gemini'
 ): Promise<string | null> => {
-    
     const conversationContext = history
         .filter(msg => msg.targets.includes(responder) || groupParticipants.includes(msg.senderName))
         .slice(-6)
         .map(msg => `${msg.sender === 'player' ? playerCountry : msg.senderName}: ${msg.text}`)
         .join('\n');
 
-    const prompt = `
-    JEU DE ROLE GEOPOLITIQUE.
-    Tu incarnes le dirigeant de : ${responder}.
-    Tu parles avec : ${playerCountry}.
-    
-    CONTEXTE DE LA DISCUSSION:
-    ${conversationContext}
-    
-    DERNIER MESSAGE REÇU: "${message}"
-    
-    INSTRUCTIONS:
-    - Réponds en tant que Chef d'État (bref, stratégique, parfois menaçant ou amical selon les intérêts).
-    - Si l'offre est mauvaise, refuse sèchement.
-    - Si tu n'es pas directement concerné ou si le message est du bruit, réponds "NO_RESPONSE".
-    
-    Réponse (1-2 phrases max) :
-    `;
+    const prompt = `Tu es le dirigeant de ${responder}. ${playerCountry} te dit : "${message}". Contexte : ${conversationContext}. Réponds de manière stratégique et concise. Si tu es offensé ou menacé, réagis en conséquence selon ta puissance par rapport à eux (Puissance Joueur: ${context.militaryPower}).`;
 
     if (provider === 'groq' && GROQ_API_KEY) {
         try {
-            const text = await callGroq(prompt, "Tu es un chef d'état réaliste. Réponds directement. Pas de préambule.", false);
+            const text = await callGroq(prompt, "Tu es un chef d'état réaliste. Réponds directement.", false);
             return text.trim() === "NO_RESPONSE" ? null : text;
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
     }
     
     try {
-        const response = await generateRobustContent(prompt, {
-            temperature: 0.7
-        });
+        const response = await generateRobustContent(prompt, { temperature: 0.7 });
         const text = response.text?.trim();
         return text === "NO_RESPONSE" ? null : text || "Reçu.";
-    } catch (e) {
-        return "Message reçu (Transmission faible).";
-    }
+    } catch (e) { return "Transmission diplomatique reçue."; }
 }
 
 const getFallbackResponse = (): SimulationResponse => ({
     timeIncrement: 'day',
-    events: [{ 
-        type: "world", 
-        headline: "Silence Radio (Surcharge Réseau)", 
-        description: "Les canaux diplomatiques sont saturés (Erreur API). Nos services de renseignement redémarrent les systèmes." 
-    }],
-    globalTensionChange: 0,
-    economyHealthChange: 0,
-    militaryPowerChange: 0,
-    popularityChange: 0,
-    corruptionChange: 0
+    events: [{ type: "world", headline: "Instabilité des communications", description: "Le flux d'informations mondial est perturbé." }],
+    globalTensionChange: 0, economyHealthChange: 0, militaryPowerChange: 0, popularityChange: 0, corruptionChange: 0
 });
 
 export const getStrategicSuggestions = async (
@@ -435,31 +286,14 @@ export const getStrategicSuggestions = async (
     recentHistory: GameEvent[],
     provider: AIProvider = 'gemini'
 ): Promise<string[]> => {
-    
     const historyContext = recentHistory.slice(-5).map(e => e.headline).join('\n');
-    const prompt = `
-    Pays: ${playerCountry}.
-    Historique récent: ${historyContext}
-    
-    Suggère 3 actions stratégiques intelligentes, machiavéliques ou diplomatiques pour ce tour.
-    Format JSON: {"suggestions": ["action 1", "action 2", "action 3"]}
-    `;
-
-    if (provider === 'groq' && GROQ_API_KEY) {
-        try {
-            const json = await callGroq(prompt, "Conseiller stratégique (Realpolitik). JSON uniquement.", true, { type: "object", properties: { suggestions: { type: "array", items: { type: "string" } } } });
-            const p = JSON.parse(json);
-            return p.suggestions || p;
-        } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
-    }
-
+    const prompt = `Suggère 3 actions machiavéliques ou diplomatiques pour ${playerCountry} sachant que : ${historyContext}. Format JSON: {"suggestions": ["..."]}`;
     try {
-        const schema: Schema = { type: Type.ARRAY, items: { type: Type.STRING } };
-        const response = await generateRobustContent(prompt, {
-             responseMimeType: "application/json", 
-             responseSchema: schema,
-             temperature: 0.8
-        });
-        return JSON.parse(response.text || "[]") as string[];
-    } catch (e) { return ["Renforcer l'armée", "Négocier une alliance", "Développer l'économie"]; }
+        if (provider === 'groq' && GROQ_API_KEY) {
+            const json = await callGroq(prompt, "Conseiller stratégique cynique. JSON uniquement.", true, { type: "object", properties: { suggestions: { type: "array", items: { type: "string" } } } });
+            return JSON.parse(json).suggestions;
+        }
+        const response = await generateRobustContent(prompt, { responseMimeType: "application/json", temperature: 0.8 });
+        return JSON.parse(response.text).suggestions || JSON.parse(response.text);
+    } catch (e) { return ["Moderniser l'industrie", "Réprimer l'opposition", "Proposer un traité"]; }
 }
