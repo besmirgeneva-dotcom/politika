@@ -889,7 +889,7 @@ const App: React.FC = () => {
                                 type="text" 
                                 value={tempModel}
                                 onChange={(e) => setTempModel(e.target.value)}
-                                placeholder="ex: mistralai/Mistral-7B-Instruct-v0.3"
+                                placeholder="ex: Qwen/Qwen2.5-72B-Instruct"
                                 className="w-full p-3 rounded-lg border border-stone-300 focus:outline-blue-500 bg-stone-50 text-sm font-mono mb-2"
                             />
                             
@@ -898,15 +898,15 @@ const App: React.FC = () => {
                                 <div className="bg-blue-50 border border-blue-100 p-2 rounded-lg">
                                     <div className="text-[10px] font-bold text-blue-600 uppercase mb-1">Modèles Recommandés (Gratuits)</div>
                                     <div className="flex flex-wrap gap-1">
-                                        <button onClick={() => setTempModel('mistralai/Mistral-7B-Instruct-v0.3')} className="bg-white border border-blue-200 text-blue-700 px-2 py-1 rounded text-[10px] hover:bg-blue-100">Mistral 7B</button>
-                                        <button onClick={() => setTempModel('Qwen/Qwen2.5-72B-Instruct')} className="bg-white border-purple-200 text-purple-700 px-2 py-1 rounded text-[10px] hover:bg-purple-100">Qwen 2.5 (Puissant)</button>
+                                        <button onClick={() => setTempModel('Qwen/Qwen2.5-72B-Instruct')} className="bg-white border-purple-200 text-purple-700 px-2 py-1 rounded text-[10px] hover:bg-purple-100">Qwen 2.5 (Stable)</button>
+                                        <button onClick={() => setTempModel('mistralai/Mistral-7B-Instruct-v0.2')} className="bg-white border-blue-200 text-blue-700 px-2 py-1 rounded text-[10px] hover:bg-blue-100">Mistral 7B (Léger)</button>
                                         <button onClick={() => setTempModel('microsoft/Phi-3-mini-4k-instruct')} className="bg-white border-green-200 text-green-700 px-2 py-1 rounded text-[10px] hover:bg-green-100">Phi-3 (Rapide)</button>
                                     </div>
                                 </div>
                             )}
 
                             <p className="text-[10px] text-stone-400 mt-1 italic">
-                                Laissez vide pour utiliser le modèle par défaut du fournisseur.
+                                Laissez vide pour utiliser le modèle par défaut (Qwen 2.5 72B).
                             </p>
                         </div>
                     </div>

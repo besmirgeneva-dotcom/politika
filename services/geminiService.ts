@@ -188,7 +188,8 @@ const RESPONSE_SCHEMA_JSON = {
     required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"]
 };
 
-// --- GENERIC OPENAI-COMPATIBLE HELPER (OpenAI, Groq, Hugging Face) ---
+// --- GENERIC OPENAI-COMPATIBLE HELPER (OpenAI, Groq) ---
+// Note: Hugging Face utilise maintenant un traitement spécial via Proxy
 const callOpenAICompatible = async (
     url: string,
     model: string,
@@ -234,15 +235,66 @@ const callOpenAICompatible = async (
     }
 };
 
-// Validation du modèle HF
+// Validation du modèle HF - CHANGEMENT DEFAULT: Qwen2.5 (plus stable/non-gated)
 const validateHFModel = (model: string | undefined): string => {
-    if (!model) return "mistralai/Mistral-7B-Instruct-v0.3";
+    if (!model) return "Qwen/Qwen2.5-72B-Instruct"; // Modèle très puissant et open
     const m = model.trim().toLowerCase();
-    // Si l'utilisateur a rentré "hugging face" ou quelque chose avec des espaces qui n'est pas un ID valide
     if (m === "hugging face" || m.includes(" ") || !m.includes("/")) {
-        return "mistralai/Mistral-7B-Instruct-v0.3";
+        return "Qwen/Qwen2.5-72B-Instruct";
     }
     return model.trim();
+};
+
+// --- SPECIAL PROXY HELPER FOR HUGGING FACE ---
+// Appelle l'endpoint local /api/proxy pour éviter CORS
+const callHuggingFaceViaProxy = async (
+    model: string,
+    prompt: string,
+    system: string,
+    apiKey: string,
+    jsonMode: boolean = true
+): Promise<string> => {
+    const endpoint = `https://api-inference.huggingface.co/models/${model}/v1/chat/completions`;
+    let systemContent = system;
+    if (jsonMode) {
+         systemContent += "\n\nCRITIQUE: TU DOIS REPONDRE UNIQUEMENT AVEC UN JSON VALIDE. PAS DE MARKDOWN. SCHEMA OBLIGATOIRE:\n" + JSON.stringify(RESPONSE_SCHEMA_JSON);
+    }
+
+    // On prépare le corps de la requête que le proxy va relayer
+    const body = {
+        messages: [
+            { role: "system", content: systemContent },
+            { role: "user", content: prompt }
+        ],
+        model: model,
+        temperature: 0.75,
+        max_tokens: 2048,
+        response_format: jsonMode ? { type: "json_object" } : undefined
+    };
+
+    try {
+        // Appel au fichier api/proxy.js que nous avons créé
+        const response = await fetch('/api/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                endpoint: endpoint,
+                apiKey: apiKey,
+                body: body
+            })
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`HF Proxy Error: ${response.status} - ${errText}`);
+        }
+
+        const data = await response.json();
+        return data.choices[0]?.message?.content || "";
+    } catch (e) {
+        console.error("HF Proxy Call Failed:", e);
+        throw e;
+    }
 };
 
 export const simulateTurn = async (
@@ -297,16 +349,15 @@ export const simulateTurn = async (
     Sois créatif. Surprends le joueur. Ne sois pas passif.
   `;
 
-  // --- HUGGING FACE ROUTING ---
+  // --- HUGGING FACE ROUTING VIA PROXY ---
   if (provider === 'huggingface' && customApiKey) {
       try {
           const modelToUse = validateHFModel(customModel);
-          // Endpoint compatible OpenAI pour HF
-          const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
-          const jsonStr = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, SYSTEM_INSTRUCTION, customApiKey, true));
+          const jsonStr = await withRetry(() => callHuggingFaceViaProxy(modelToUse, prompt, SYSTEM_INSTRUCTION, customApiKey, true));
           return JSON.parse(jsonStr) as SimulationResponse;
       } catch (error) {
           console.error("Hugging Face error", error);
+          // Fallback handled by outer loop if needed, but here we just log
       }
   }
 
@@ -452,12 +503,11 @@ export const sendDiplomaticMessage = async (
     Réponse (1-2 phrases max) :
     `;
 
-    // Hugging Face
+    // Hugging Face via Proxy
     if (provider === 'huggingface' && customApiKey) {
         try {
             const modelToUse = validateHFModel(customModel);
-            const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
-            const text = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, "Tu es un chef d'état. Réponds directement.", customApiKey, false));
+            const text = await withRetry(() => callHuggingFaceViaProxy(modelToUse, prompt, "Tu es un chef d'état. Réponds directement.", customApiKey, false));
             return text.trim() === "NO_RESPONSE" ? null : text;
         } catch (e) { console.warn("Hugging Face failed."); }
     }
@@ -522,12 +572,11 @@ export const getStrategicSuggestions = async (
     Format JSON: {"suggestions": ["action 1", "action 2", "action 3"]}
     `;
 
-    // Hugging Face
+    // Hugging Face via Proxy
     if (provider === 'huggingface' && customApiKey) {
         try {
             const modelToUse = validateHFModel(customModel);
-            const url = `https://api-inference.huggingface.co/models/${modelToUse}/v1/chat/completions`;
-            const json = await withRetry(() => callOpenAICompatible(url, modelToUse, prompt, "Conseiller stratégique. JSON.", customApiKey, true));
+            const json = await withRetry(() => callHuggingFaceViaProxy(modelToUse, prompt, "Conseiller stratégique. JSON.", customApiKey, true));
             const p = JSON.parse(json);
             return p.suggestions || p;
         } catch (e) { console.warn("Hugging Face failed."); }
