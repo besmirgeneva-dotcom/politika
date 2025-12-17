@@ -45,7 +45,7 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
         }
 
         if (retries > 0 && (isRateLimit || isServerOverload)) {
-            console.warn(`Gemini API Busy/Overloaded. Retrying in ${delay}ms... (${retries} attempts left)`);
+            console.warn(`API Busy/Overloaded. Retrying in ${delay}ms... (${retries} attempts left)`);
             // Add jitter
             const jitter = Math.random() * 500;
             await new Promise(r => setTimeout(r, delay + jitter));
@@ -88,34 +88,31 @@ const generateRobustContent = async (
     }
 };
 
-// --- INSTRUCTIONS UNIFIÉES ---
+// --- INSTRUCTIONS UNIFIÉES ET RENFORCÉES ---
 const SYSTEM_INSTRUCTION = `
-Tu es le "Game Master" d'un jeu de stratégie géopolitique (GeoSim).
-Ton but est de générer une simulation RÉALISTE, IMPRÉVISIBLE et COHÉRENTE avec l'année 2000.
+ROLE: Tu es le "Moteur de Réalité" d'une simulation géopolitique complexe (GeoSim).
+CONTEXTE: Jeu vidéo de stratégie "Grand Strategy".
+OBJECTIF: Simuler un monde VIVANT, AUTONOME et COHÉRENT.
 
-### 1. PHILOSOPHIE "REALPOLITIK"
-- **LOI DU PLUS FORT** : Si le joueur envahit un petit pays isolé sans alliés, l'annexion RÉUSSIT.
-- **LE PRIX DU SANG** : Une annexion réussie augmente la Tension, baisse la Popularité, et augmente la Corruption.
-- **GUERRE SYMÉTRIQUE** : Guerre d'usure si forces équilibrées.
+RÈGLES D'OR POUR L'IA (CRITIQUE):
+1. **AUTONOMIE TOTALE DES PNJs**:
+   - Tu contrôles les 195 autres pays. Ils ont leurs propres intérêts.
+   - ILS N'ATTENDENT PAS LE JOUEUR. Ils signent des traités, déclenchent des guerres et des crises économiques ENTRE EUX.
+   - Si le joueur ne fait rien, le monde doit quand même évoluer (et souvent sombrer dans le chaos).
 
-### 2. GESTION DU TEMPS
-- 'day' : Guerre active.
-- 'month' : Tensions.
-- 'year' : Paix.
+2. **LE JOUEUR N'EST PAS DIEU**:
+   - Si le joueur ordonne une action irréaliste (ex: Le Luxembourg annexe la Chine), l'action DOIT ÉCHOUER avec des conséquences désastreuses.
+   - Ne sois pas complaisant. Oppose une résistance diplomatique et militaire logique.
 
-### 3. DIPLOMATIE
-- Réactions logiques aux actes du joueur.
-- Messages brefs.
-- Noms français exacts.
+3. **GÉNÉRATION D'ÉVÉNEMENTS**:
+   - À CHAQUE TOUR, génère au moins 1 ou 2 événements majeurs ("world" ou "crisis") qui n'impliquent PAS le joueur.
+   - Exemples: "Coup d'État au Nigeria", "Crash boursier à Tokyo", "Tensions frontalières Inde-Pakistan".
 
-### 4. ANNEXION DIPLOMATIQUE (IMPORTANT)
-- Si le joueur demande gentiment d'annexer un pays (via ordre ou chat) et que les relations sont neutres ou amicales :
-  - **NE REFUSE PAS CATÉGORIQUEMENT**.
-  - Montre de l'intérêt mais avec des CONDITIONS.
-  - Exemples : "Nous acceptons une union si vous investissez...", "Oui, mais en gardant notre autonomie locale", "Seulement si vous nous protégez de [Ennemi]".
-  - Si le joueur est très puissant et menaçant, les petits pays peuvent se soumettre par peur ("Nous acceptons pour éviter la guerre").
+4. **TON ET STYLE**:
+   - Style journalistique ou dépêche diplomatique. Précis, froid, impactant.
+   - Utilise les noms français exacts des pays.
 
-Format réponse : JSON uniquement.
+Format de réponse attendu : JSON UNIQUEMENT.
 `;
 
 // Schema definition for Groq (JSON)
@@ -194,7 +191,8 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
         let systemContent = system;
         if (jsonMode) {
              const schemaToUse = schema || RESPONSE_SCHEMA_JSON;
-             systemContent += "\n\nIMPORTANT: Tu DOIS répondre UNIQUEMENT avec un JSON valide respectant strictement ce schéma:\n" + JSON.stringify(schemaToUse);
+             // Llama 3 needs strong JSON reinforcement
+             systemContent += "\n\nCRITIQUE: TU DOIS REPONDRE UNIQUEMENT AVEC UN JSON VALIDE. PAS DE MARKDOWN (```json). PAS DE COMMENTAIRES.\nSCHEMA OBLIGATOIRE:\n" + JSON.stringify(schemaToUse);
         }
 
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -209,12 +207,17 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
                     { role: "user", content: prompt }
                 ],
                 model: "llama-3.3-70b-versatile",
-                temperature: 0.7,
+                temperature: 0.75, // Increased slightly for more creativity/chaos
+                max_tokens: 2048,
                 response_format: jsonMode ? { type: "json_object" } : undefined
             })
         });
         
-        if (!response.ok) throw new Error(`Groq API Error: ${response.status}`);
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(`Groq API Error ${response.status}: ${JSON.stringify(errData)}`);
+        }
+        
         const data = await response.json();
         return data.choices[0]?.message?.content || "";
     } catch (e) {
@@ -238,8 +241,7 @@ export const simulateTurn = async (
 ): Promise<SimulationResponse> => {
   
   const historyContext = recentHistory.slice(-15).map(e => `[${e.date}] ${e.type.toUpperCase()}: ${e.headline}`).join('\n');
-  const infrastructureContext = existingEntities.length > 0 ? existingEntities.join('\n- ') : "Aucune infrastructure majeure.";
-
+  
   let chaosInstruction = "";
   if (chaosLevel === 'peaceful') chaosInstruction = "MODE PACIFIQUE: Guerre interdite.";
   if (chaosLevel === 'normal') chaosInstruction = "MODE STANDARD: Équilibre réaliste.";
@@ -247,20 +249,24 @@ export const simulateTurn = async (
   if (chaosLevel === 'chaos') chaosInstruction = "MODE APOCALYPSE: Guerre totale.";
 
   const prompt = `
-    --- ETAT DU MONDE (${currentDate}) ---
-    NATION JOUEUR: ${playerCountry}
+    CONTEXTE SIMULATION (FICTION):
+    DATE ACTUELLE: ${currentDate}
+    PAYS DU JOUEUR: ${playerCountry}
     POSSESSIONS: ${ownedTerritories.join(', ')}
-    CHAOS: ${chaosInstruction}
-    ORDRES: "${playerAction || "Gouvernance standard."}"
-    DIPLOMATIE: ${diplomaticContext}
-    HISTORIQUE: ${historyContext}
+    NIVEAU DE CHAOS: ${chaosInstruction}
+    
+    ACTION DU JOUEUR (ORDRES): "${playerAction || "Gouvernance standard. Maintien du statu quo."}"
+    
+    CONTEXTE HISTORIQUE RÉCENT:
+    ${historyContext}
 
-    TÂCHES:
-    1. Analyse les ordres et DÉCIDE du 'timeIncrement'.
-    2. Simule le tour avec réalisme (conséquences annexion).
-    3. Gère stats (Tension, Eco, Pop, Corruption).
-    4. Messages diplo si nécessaire.
-    5. Si le joueur demande une annexion pacifique : Analyse la puissance et les relations. Si favorable, accepte l'annexion ('mapUpdates') avec un message de soumission ou de conditions.
+    TES MISSIONS POUR CE TOUR:
+    1. **Juger l'action du joueur**: Est-elle possible ? Est-elle intelligente ? Si c'est stupide, fais-la échouer (baisse économie/popularité).
+    2. **Simuler le Reste du Monde**: Génère des événements qui n'impliquent PAS le joueur. Fais bouger les lignes entre les USA, la Russie, la Chine, l'Europe, etc.
+    3. **Définir le Temps**: Choisis 'day' si urgence/guerre, 'month' si tensions, 'year' si calme.
+    4. **Conséquences**: Mets à jour les stats (Tension, Économie, Corruption) de façon punitive si nécessaire.
+    
+    Sois créatif. Surprends le joueur. Ne sois pas passif.
   `;
 
   // Gemini Schema
@@ -337,6 +343,8 @@ export const simulateTurn = async (
           } catch (error) {
               console.warn("Groq failed, fallback to Gemini.", error);
           }
+      } else {
+          console.warn("Groq Key missing. Fallback Gemini.");
       }
   } 
   
@@ -345,7 +353,7 @@ export const simulateTurn = async (
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: geminiSchema,
-          temperature: chaosLevel === 'chaos' ? 0.9 : 0.7,
+          temperature: chaosLevel === 'chaos' ? 0.95 : 0.8, // Increased temperature for Gemini too
       });
       const text = response.text;
       if (!text) throw new Error("No AI response");
@@ -373,30 +381,34 @@ export const sendDiplomaticMessage = async (
         .join('\n');
 
     const prompt = `
-    Tu incarnes : ${responder}.
-    Interlocuteur : ${playerCountry}.
-    Contexte : ${conversationContext}
-    Message Joueur : "${message}"
-    Réponds de manière réaliste (Realpolitik). 
-    Si non concerné: "NO_RESPONSE".
+    JEU DE ROLE GEOPOLITIQUE.
+    Tu incarnes le dirigeant de : ${responder}.
+    Tu parles avec : ${playerCountry}.
     
-    RÈGLE ANNEXION : 
-    - Si le joueur demande une annexion et que vous êtes AMIS ou qu'il fait PEUR : NE REFUSE PAS DIRECTEMENT.
-    - Propose des conditions : "Oui, si vous nous donnez 1 milliard", "D'accord, mais en tant qu'état autonome", "Seulement si vous nous protégez".
-    - Si refus nécessaire : "Jamais ! Nous défendrons notre souveraineté."
-
-    Une seule phrase.
+    CONTEXTE DE LA DISCUSSION:
+    ${conversationContext}
+    
+    DERNIER MESSAGE REÇU: "${message}"
+    
+    INSTRUCTIONS:
+    - Réponds en tant que Chef d'État (bref, stratégique, parfois menaçant ou amical selon les intérêts).
+    - Si l'offre est mauvaise, refuse sèchement.
+    - Si tu n'es pas directement concerné ou si le message est du bruit, réponds "NO_RESPONSE".
+    
+    Réponse (1-2 phrases max) :
     `;
 
     if (provider === 'groq' && GROQ_API_KEY) {
         try {
-            const text = await callGroq(prompt, "Tu es un chef d'état.", false);
+            const text = await callGroq(prompt, "Tu es un chef d'état réaliste. Réponds directement. Pas de préambule.", false);
             return text.trim() === "NO_RESPONSE" ? null : text;
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
     }
     
     try {
-        const response = await generateRobustContent(prompt, {});
+        const response = await generateRobustContent(prompt, {
+            temperature: 0.7
+        });
         const text = response.text?.trim();
         return text === "NO_RESPONSE" ? null : text || "Reçu.";
     } catch (e) {
@@ -409,7 +421,7 @@ const getFallbackResponse = (): SimulationResponse => ({
     events: [{ 
         type: "world", 
         headline: "Silence Radio (Surcharge Réseau)", 
-        description: "Les satellites ne répondent plus (Erreur 503). Les canaux diplomatiques sont saturés. Réessayez dans quelques instants." 
+        description: "Les canaux diplomatiques sont saturés (Erreur API). Nos services de renseignement redémarrent les systèmes." 
     }],
     globalTensionChange: 0,
     economyHealthChange: 0,
@@ -425,11 +437,17 @@ export const getStrategicSuggestions = async (
 ): Promise<string[]> => {
     
     const historyContext = recentHistory.slice(-5).map(e => e.headline).join('\n');
-    const prompt = `Pays: ${playerCountry}. Historique: ${historyContext}. 3 actions stratégiques courtes (JSON array).`;
+    const prompt = `
+    Pays: ${playerCountry}.
+    Historique récent: ${historyContext}
+    
+    Suggère 3 actions stratégiques intelligentes, machiavéliques ou diplomatiques pour ce tour.
+    Format JSON: {"suggestions": ["action 1", "action 2", "action 3"]}
+    `;
 
     if (provider === 'groq' && GROQ_API_KEY) {
         try {
-            const json = await callGroq(prompt, "Conseiller stratégique", true, { type: "object", properties: { suggestions: { type: "array", items: { type: "string" } } } });
+            const json = await callGroq(prompt, "Conseiller stratégique (Realpolitik). JSON uniquement.", true, { type: "object", properties: { suggestions: { type: "array", items: { type: "string" } } } });
             const p = JSON.parse(json);
             return p.suggestions || p;
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
@@ -439,8 +457,9 @@ export const getStrategicSuggestions = async (
         const schema: Schema = { type: Type.ARRAY, items: { type: Type.STRING } };
         const response = await generateRobustContent(prompt, {
              responseMimeType: "application/json", 
-             responseSchema: schema 
+             responseSchema: schema,
+             temperature: 0.8
         });
         return JSON.parse(response.text || "[]") as string[];
-    } catch (e) { return ["Renforcer l'armée", "Développer l'industrie", "Accords commerciaux"]; }
+    } catch (e) { return ["Renforcer l'armée", "Négocier une alliance", "Développer l'économie"]; }
 }
