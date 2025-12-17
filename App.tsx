@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import WorldMap from './components/WorldMap';
 import EventLog from './components/EventLog';
@@ -23,9 +24,6 @@ interface SaveMetadata {
 }
 
 // --- SCREENS ---
-// 'portal_landing' : Site web façade
-// 'portal_dashboard' : Après connexion (Choix du jeu)
-// 'game_splash' | 'game_loading' | 'game_running' : Le jeu GeoSim original
 type AppMode = 'portal_landing' | 'portal_dashboard' | 'game_active';
 type GameScreen = 'splash' | 'loading' | 'game';
 
@@ -253,7 +251,6 @@ const App: React.FC = () => {
 
 
   // --- SAVE SYSTEM LOGIC (CLOUD ONLY) ---
-  // ... (Save logic mostly unchanged, omitted for brevity but preserved in final file)
   const saveGame = async (state: GameState, history: GameEvent[], showNotif = true) => {
       if (!user || !db) {
           showNotification("Connexion requise pour sauvegarder !");
@@ -617,7 +614,6 @@ const App: React.FC = () => {
   };
 
   // Helper to mark messages as read
-  // CORRECTION: Logic simplifiée pour s'assurer que le badge disparait bien
   const handleMarkChatRead = (conversationPartners: string[]) => {
       if (!gameState.playerCountry) return;
       
@@ -626,9 +622,6 @@ const App: React.FC = () => {
               // Si déjà lu ou envoyé par le joueur, on ignore
               if (msg.isRead || msg.sender === 'player') return msg;
               
-              // Si le message vient de quelqu'un qui est dans la conversation ouverte
-              // OU si c'est un message de groupe où les partenaires correspondent
-              // NORMALIZE CHECK to fix badge issues
               if (conversationPartners.includes(normalizeCountryName(msg.senderName))) {
                   return { ...msg, isRead: true };
               }
@@ -636,7 +629,6 @@ const App: React.FC = () => {
               return msg;
           });
           
-          // Vérification globale restante
           const remainingUnread = newHistory.some(m => !m.isRead && m.sender !== 'player');
           setHasUnreadChat(remainingUnread);
 
@@ -646,7 +638,6 @@ const App: React.FC = () => {
 
   // --- TURN PROCESSING ---
   const handleNextTurn = async () => {
-    // ... (rest of function largely same)
     if (gameState.isProcessing || !gameState.playerCountry || gameState.isGameOver) return;
     setActiveWindow('none');
 
@@ -683,7 +674,6 @@ const App: React.FC = () => {
         aiProvider
     );
 
-    // ... (processing results)
     const nextDate = new Date(gameState.currentDate);
     if (result.timeIncrement === 'day') nextDate.setDate(nextDate.getDate() + 1);
     else if (result.timeIncrement === 'year') nextDate.setFullYear(nextDate.getFullYear() + 1);
@@ -698,7 +688,6 @@ const App: React.FC = () => {
         relatedCountry: e.relatedCountry
     }));
 
-    // ... (map updates, alliance updates logic same as before)
     let newOwnedTerritories = [...gameState.ownedTerritories];
     let newEntities = [...gameState.mapEntities];
     let newHasNuclear = gameState.hasNuclear;
@@ -718,13 +707,15 @@ const App: React.FC = () => {
                     newOwnedTerritories.push(target);
                     if (hasNuclearArsenal(target)) newHasNuclear = true;
                 }
-            }
-            if (['build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'].includes(update.type)) {
-                let mType: MapEntityType = 'factory';
-                if (update.type === 'build_port') mType = 'port';
-                if (update.type === 'build_airport') mType = 'military_airport';
-                if (update.type === 'build_airbase') mType = 'airbase';
-                if (update.type === 'build_defense') mType = 'defense';
+            } else if (update.type === 'remove_entity') {
+                newEntities = newEntities.filter(e => e.id !== update.entityId && e.label !== update.label);
+            } else if (update.type.startsWith('build_')) {
+                let mType: MapEntityType = 'military_factory';
+                if (update.type === 'build_port') mType = 'military_port';
+                else if (update.type === 'build_airport') mType = 'military_base';
+                else if (update.type === 'build_airbase') mType = 'airbase';
+                else if (update.type === 'build_defense') mType = 'defense_system';
+                
                 newEntities.push({
                     id: `ent-${Date.now()}-${Math.random()}`,
                     type: mType,
@@ -878,10 +869,6 @@ const App: React.FC = () => {
       }
   };
 
-  // ... (Render logic remains same)
-  // ... (Keeping exact same return structure as previously provided)
-  // Just inserting the updated handleMarkChatRead logic above.
-  
   const renderLoadMenuOverlay = () => (
       <div className="absolute inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-0 max-w-md w-full border border-stone-200 overflow-hidden flex flex-col max-h-[80vh]">
@@ -1064,7 +1051,6 @@ const App: React.FC = () => {
   }
 
   if (appMode === 'portal_dashboard') {
-      // ... (Dashboard render logic, unchanged)
       return (
           <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
               {isGlobalLoading && (

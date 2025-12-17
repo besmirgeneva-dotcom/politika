@@ -92,10 +92,13 @@ ROLE: Tu es le "Moteur de Réalité" de GeoSim, une simulation géopolitique san
 RÈGLES DE COMPORTEMENT (CRITIQUE) :
 1. **RÉALISME BRUTAL** : Ne sois pas un simple exécutant des ordres du joueur. Si un ordre est donné, simule sa mise en œuvre RÉELLE. Il y a des imprévus, des trahisons, des échecs logistiques ou des succès inattendus.
 2. **ASYMÉTRIE DE PUISSANCE** : 
-   - Si une nation puissante (Militaire > 70) attaque ou annexe une nation faible (ex: petit pays en développement, micro-état), l'annexion militaire doit être FACILE et RAPIDE. 
-   - Cependant, la difficulté se déplace : l'annexion doit générer une forte instabilité interne (insurrections), une chute de popularité et une condamnation internationale massive (hausse de la Tension Mondiale).
-3. **AUTONOMIE MONDIALE** : Les autres pays (IA) agissent selon la Realpolitik. Ils forment des coalitions contre le joueur s'il devient trop agressif.
-4. **STYLE ÉDITORIAL** : Tes descriptions doivent ressembler à des rapports de renseignement ou des breaking news de grandes agences (AFP, Reuters). Pas de ton "jeu vidéo" générique.
+   - Si une nation puissante (Militaire > 70) attaque ou annexe une nation faible, l'annexion militaire doit être FACILE et RAPIDE mais avec des conséquences politiques.
+3. **CARTOGRAPHIE MILITAIRE** : 
+   - Types de marqueurs autorisés UNIQUEMENT : 'build_factory' (usine d'armement/avions), 'build_port' (port militaire), 'build_airport' (base militaire terrestre), 'build_airbase' (base aérienne), 'build_defense' (radar, missiles).
+   - PRÉCISION DU PLACEMENT : Tu dois t'assurer que les coordonnées (lat, lng) fournies sont STRICTEMENT à l'intérieur des frontières du pays concerné. Ne place jamais un point chez un voisin. Vérifie la géographie.
+   - SUPPRESSION : Si le joueur demande de supprimer ou retirer une installation, ou si elle est détruite, utilise 'remove_entity' avec l'ID ou le label concerné.
+4. **AUTONOMIE MONDIALE** : Les autres pays (IA) agissent selon la Realpolitik.
+5. **STYLE ÉDITORIAL** : Rapports de renseignement (AFP, Reuters).
 `;
 
 const RESPONSE_SCHEMA_JSON = {
@@ -126,12 +129,13 @@ const RESPONSE_SCHEMA_JSON = {
         items: {
             type: "object",
             properties: {
-                type: { type: "string", enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'] },
+                type: { type: "string", enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'remove_entity'] },
                 targetCountry: { type: "string" },
                 newOwner: { type: "string" },
                 lat: { type: "number" },
                 lng: { type: "number" },
-                label: { type: "string" }
+                label: { type: "string" },
+                entityId: { type: "string" }
             },
             required: ['type', 'targetCountry']
         }
@@ -217,13 +221,15 @@ export const simulateTurn = async (
     HISTORIQUE RECENT:
     ${historyContext}
 
+    INSTALLATIONS ACTUELLES: ${existingEntities.join(', ')}
+
     DIPLOMATIE ACTUELLE: ${diplomaticContext}
 
     CONSIGNES DE SIMULATION :
-    1. Traite l'ordre du joueur avec nuance. Ne le valide pas bêtement. Si le joueur veut annexer un pays beaucoup plus faible, l'annexion RÉUSSIT militairement mais déclenche des sanctions et de la guérilla.
-    2. Si l'ordre est complexe (ex: réforme économique), décris les effets secondaires (inflation, mécontentement, ou croissance explosive).
-    3. Le monde continue de tourner : produis au moins 2 événements majeurs impliquant d'autres grandes puissances (USA, Chine, Russie, UE).
-    4. Sois imprévisible : introduis des variables aléatoires (catastrophes, découvertes, scandales).
+    1. Traite l'ordre du joueur avec nuance.
+    2. Respecte les types d'entités demandés. Pour les suppressions, utilise 'remove_entity'.
+    3. ASSURE-TOI QUE LES COORDONNÉES DES NOUVELLES INSTALLATIONS SONT BIEN DANS LE PAYS CIBLE. Ne place rien chez le voisin.
+    4. Le monde continue de tourner : produis au moins 2 événements majeurs.
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
