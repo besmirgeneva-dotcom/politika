@@ -103,6 +103,7 @@ export const AI_NAME_CORRECTIONS: Record<string, string> = {
     "Germany": "Allemagne",
     "Italy": "Italie",
     "Spain": "Espagne",
+    "Greece": "Grèce", // Fix Grèce
     "Japan": "Japon",
     "South Korea": "Corée du Sud",
     "North Korea": "Corée du Nord",
@@ -116,7 +117,12 @@ export const AI_NAME_CORRECTIONS: Record<string, string> = {
     "Australia": "Australie",
     "Iran": "Iran",
     "Israel": "Israël",
-    "Egypt": "Égypte"
+    "Egypt": "Égypte",
+    "Republic of Kosovo": "Kosovo", // Fix Kosovo
+    "Kosovo": "Kosovo",
+    "Macedonia": "Macédoine du Nord",
+    "Syria": "Syrie",
+    "Lebanon": "Liban"
 };
 
 export const normalizeCountryName = (name: string): string => {

@@ -628,7 +628,8 @@ const App: React.FC = () => {
               
               // Si le message vient de quelqu'un qui est dans la conversation ouverte
               // OU si c'est un message de groupe où les partenaires correspondent
-              if (conversationPartners.includes(msg.senderName)) {
+              // NORMALIZE CHECK to fix badge issues
+              if (conversationPartners.includes(normalizeCountryName(msg.senderName))) {
                   return { ...msg, isRead: true };
               }
               
