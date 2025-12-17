@@ -58,6 +58,7 @@ export interface GameState {
   chatHistory: ChatMessage[];
   chaosLevel: ChaosLevel;
   alliance: Alliance | null;
+  historySummary: string; // NOUVEAU: Résumé compressé de l'histoire
   isGameOver: boolean; // État de défaite
   gameOverReason: string | null;
 }

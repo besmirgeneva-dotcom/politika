@@ -6,7 +6,7 @@ import ChatInterface from './components/ChatInterface';
 import AllianceWindow from './components/AllianceWindow';
 import DateControls from './components/DateControls';
 import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType } from './types';
-import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
+import { simulateTurn, getStrategicSuggestions, sendBatchDiplomaticMessage, generateHistorySummary, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
 import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeToAuthChanges, db } from './services/authService';
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, onSnapshot } from 'firebase/firestore';
@@ -136,6 +136,7 @@ const App: React.FC = () => {
     chatHistory: [],
     chaosLevel: 'normal',
     alliance: null,
+    historySummary: '', // Init vide
     isGameOver: false,
     gameOverReason: null
   });
@@ -375,7 +376,7 @@ const App: React.FC = () => {
         playerCountry: null, ownedTerritories: [], mapEntities: [], turn: 1, events: [], isProcessing: false,
         globalTension: 20, economyHealth: 50, militaryPower: 50, popularity: 60, corruption: 30,
         hasNuclear: false, hasSpaceProgram: false, militaryRank: 100, chatHistory: [], chaosLevel: 'normal',
-        alliance: null, isGameOver: false, gameOverReason: null
+        alliance: null, historySummary: '', isGameOver: false, gameOverReason: null
       });
       setFullHistory([]); setEventQueue([]); setShowStartModal(true); setAppMode('game_active'); setCurrentScreen('splash'); 
   };
@@ -437,7 +438,7 @@ const App: React.FC = () => {
       return await getStrategicSuggestions(gameState.playerCountry, fullHistory, effectiveProvider, apiKeyToUse, modelToUse);
   }
 
-  // --- DIPLOMATIC CHAT HANDLER ---
+  // --- BATCH DIPLOMATIC CHAT HANDLER ---
   const handleSendChatMessage = async (targets: string[], message: string) => {
       if (!gameState.playerCountry) return;
       const userMsg: ChatMessage = {
@@ -446,7 +447,6 @@ const App: React.FC = () => {
       setGameState(prev => ({ ...prev, isProcessing: true, chatHistory: [...prev.chatHistory, userMsg] }));
       setTypingParticipants(targets);
       
-      const context = { militaryPower: gameState.militaryPower, economyHealth: gameState.economyHealth, globalTension: gameState.globalTension, hasNuclear: gameState.hasNuclear };
       const updatedHistoryForContext = [...gameState.chatHistory, userMsg];
 
       const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
@@ -454,26 +454,40 @@ const App: React.FC = () => {
       const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
 
       try {
-        const aiPromises = targets.map(async (targetCountry) => {
-            const responseText = await sendDiplomaticMessage(
-                gameState.playerCountry!, targetCountry, targets, message, updatedHistoryForContext, context, effectiveProvider, apiKeyToUse, modelToUse
-            );
-            setTypingParticipants(prev => prev.filter(p => p !== targetCountry));
-            if (!responseText) return null;
-            return {
-                id: `msg-${Date.now()}-${targetCountry}`, sender: 'ai', senderName: targetCountry, targets: targets, 
-                text: responseText, timestamp: Date.now() + Math.floor(Math.random() * 500), isRead: false 
-            } as ChatMessage;
+        // CALL BATCH API
+        const responses = await sendBatchDiplomaticMessage(
+            gameState.playerCountry!,
+            targets,
+            message,
+            updatedHistoryForContext,
+            effectiveProvider,
+            apiKeyToUse,
+            modelToUse
+        );
+
+        const newMessages: ChatMessage[] = [];
+        
+        // Parse responses map
+        Object.entries(responses).forEach(([country, respText]) => {
+            if (respText && respText !== "NO_RESPONSE" && targets.includes(country)) {
+                newMessages.push({
+                    id: `msg-${Date.now()}-${country}`,
+                    sender: 'ai',
+                    senderName: country,
+                    targets: targets,
+                    text: respText,
+                    timestamp: Date.now() + Math.floor(Math.random() * 500),
+                    isRead: false
+                });
+            }
         });
 
-        const aiResponses = await Promise.all(aiPromises);
-        const validResponses = aiResponses.filter(r => r !== null) as ChatMessage[];
-
-        setGameState(prev => ({ ...prev, isProcessing: false, chatHistory: [...prev.chatHistory, ...validResponses] }));
-        if (validResponses.length > 0) setHasUnreadChat(true);
+        setGameState(prev => ({ ...prev, isProcessing: false, chatHistory: [...prev.chatHistory, ...newMessages] }));
+        if (newMessages.length > 0) setHasUnreadChat(true);
 
       } catch (e) {
           console.error("Chat error", e);
+      } finally {
           setTypingParticipants([]); 
           setGameState(prev => ({ ...prev, isProcessing: false }));
       }
@@ -517,9 +531,17 @@ const App: React.FC = () => {
     const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
     const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
 
+    // --- RESUME HISTORIQUE (Toutes les 10 tours) ---
+    let currentSummary = gameState.historySummary;
+    if (gameState.turn % 10 === 0 && fullHistory.length > 10) {
+        // On génère un résumé en tâche de fond (await ici pour simplicité mais bloque un peu l'UI)
+        showNotification("Mise à jour des archives...");
+        currentSummary = await generateHistorySummary(gameState.playerCountry, fullHistory, currentSummary, effectiveProvider, apiKeyToUse, modelToUse);
+    }
+
     const result = await simulateTurn(
         gameState.playerCountry, formattedDate, finalOrderString, gameState.events, gameState.ownedTerritories,
-        entityDesc, isLandlocked, gameState.hasNuclear, recentChat, gameState.chaosLevel, effectiveProvider, apiKeyToUse, modelToUse
+        entityDesc, isLandlocked, gameState.hasNuclear, recentChat, gameState.chaosLevel, effectiveProvider, apiKeyToUse, modelToUse, currentSummary
     );
 
     const nextDate = new Date(gameState.currentDate);
@@ -658,6 +680,7 @@ const App: React.FC = () => {
         militaryPower: newMilitaryPower, popularity: newPopularity, corruption: newCorruption,
         hasNuclear: newHasNuclear, hasSpaceProgram: newHasSpaceProgram, militaryRank: newRank,
         isProcessing: false, chatHistory: newChatHistory, alliance: currentAlliance,
+        historySummary: currentSummary, // Mise à jour du résumé
         isGameOver: gameOver, gameOverReason: failReason
     };
 
