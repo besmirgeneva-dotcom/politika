@@ -1,6 +1,6 @@
 {
-  "name": "GeoSim Web",
-  "description": "Jeu de stratégie géopolitique par navigateur propulsé par l'IA. Incarnez une nation, l'IA simule le reste du monde.",
-  "checkpoint": "version web optimisée",
+  "name": "GeoSim",
+  "description": "A turn-based geopolitical strategy game where you lead a nation and the AI simulates the rest of the world.",
+  "checkpoint": "version de base fonctionnel",
   "requestFramePermissions": []
 }

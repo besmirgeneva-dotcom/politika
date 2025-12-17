@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import WorldMap from './components/WorldMap';
 import EventLog from './components/EventLog';
@@ -6,7 +5,6 @@ import HistoryLog from './components/HistoryLog';
 import ChatInterface from './components/ChatInterface';
 import AllianceWindow from './components/AllianceWindow';
 import DateControls from './components/DateControls';
-import NewsTicker from './components/NewsTicker';
 import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType } from './types';
 import { simulateTurn, getStrategicSuggestions, sendBatchDiplomaticMessage, generateHistorySummary, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
@@ -33,23 +31,14 @@ const getInitialStats = (country: string): { power: number, corruption: number }
     const c = country.toLowerCase();
     if (c.includes('états-unis') || c.includes('usa')) return { power: 95, corruption: 15 };
     if (c.includes('france') || c.includes('royaume-uni') || c.includes('allemagne') || c.includes('japon') || c.includes('canada')) return { power: 65, corruption: 10 };
-<<<<<<< HEAD
-    if (c.includes('chine')) return { power: 60, corruption: 50 };
-    if (c.includes('russie')) return { power: 70, corruption: 60 };
-=======
-<<<<<<< HEAD
-    if (c.includes('chine')) return { power: 60, corruption: 50 };
-    if (c.includes('russie')) return { power: 70, corruption: 60 };
-=======
     if (c.includes('chine')) return { power: 60, corruption: 50 }; // En 2000
     if (c.includes('russie')) return { power: 70, corruption: 60 }; // Post-soviétique 2000
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
     if (c.includes('inde')) return { power: 50, corruption: 55 };
     if (c.includes('brésil')) return { power: 45, corruption: 50 };
     return { power: 30, corruption: 40 }; 
 };
 
+// Helper to determine initial rank based on power
 const calculateRank = (power: number): number => {
     return Math.max(1, Math.min(195, Math.floor(196 - (power * 1.95))));
 };
@@ -58,13 +47,7 @@ const isCountryLandlocked = (country: string): boolean => LANDLOCKED_COUNTRIES.s
 const hasNuclearArsenal = (country: string): boolean => NUCLEAR_POWERS.some(c => country.includes(c));
 const hasSpaceProgramInitial = (country: string): boolean => SPACE_POWERS.some(c => country.includes(c));
 
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
 // --- LOGO COMPONENT ---
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
 const GameLogo = ({ size = 'large', theme = 'dark' }: { size?: 'small' | 'large', theme?: 'dark' | 'light' }) => {
     const isLight = theme === 'light';
     return (
@@ -89,38 +72,21 @@ const GameLogo = ({ size = 'large', theme = 'dark' }: { size?: 'small' | 'large'
 };
 
 const App: React.FC = () => {
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
   // --- APP LEVEL STATE ---
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
   const [appMode, setAppMode] = useState<AppMode>('portal_landing');
+  
+  // --- GAME INTERNAL STATE ---
   const [currentScreen, setCurrentScreen] = useState<GameScreen>('splash');
   const [hasSave, setHasSave] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  
+  // Settings & Load Menu State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
   
   // AI Settings
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
-  const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('custom_gemini_key') || "");
-  const [customProviderName, setCustomProviderName] = useState<string>(() => localStorage.getItem('custom_provider_name') || "gemini");
-  const [customModelName, setCustomModelName] = useState<string>(() => localStorage.getItem('custom_model_name') || "");
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [tempKey, setTempKey] = useState("");
-  const [tempModel, setTempModel] = useState("");
-  const [isSyncing, setIsSyncing] = useState(true);
-  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
-<<<<<<< HEAD
-=======
-=======
   // CUSTOM AI KEY LOGIC
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('custom_gemini_key') || "");
   const [customProviderName, setCustomProviderName] = useState<string>(() => localStorage.getItem('custom_provider_name') || "gemini");
@@ -135,29 +101,22 @@ const App: React.FC = () => {
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
 
   // Bug Report State
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
   const [showBugReportModal, setShowBugReportModal] = useState(false);
   const [bugTitle, setBugTitle] = useState("");
   const [bugDescription, setBugDescription] = useState("");
   const [isSendingBug, setIsSendingBug] = useState(false);
+
+  // Auth State
   const [user, setUser] = useState<any>(null);
+  
+  // --- LOGIN MODAL STATE ---
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
   
+  // Game State
   const [gameState, setGameState] = useState<GameState>({
-<<<<<<< HEAD
-    gameId: '', currentDate: INITIAL_DATE, playerCountry: null, ownedTerritories: [], mapEntities: [], turn: 1, events: [], isProcessing: false,
-    globalTension: 20, economyHealth: 50, militaryPower: 50, popularity: 60, corruption: 30, hasNuclear: false, hasSpaceProgram: false,
-    militaryRank: 100, chatHistory: [], chaosLevel: 'normal', alliance: null, historySummary: '', isGameOver: false, gameOverReason: null
-=======
-<<<<<<< HEAD
-    gameId: '', currentDate: INITIAL_DATE, playerCountry: null, ownedTerritories: [], mapEntities: [], turn: 1, events: [], isProcessing: false,
-    globalTension: 20, economyHealth: 50, militaryPower: 50, popularity: 60, corruption: 30, hasNuclear: false, hasSpaceProgram: false,
-    militaryRank: 100, chatHistory: [], chaosLevel: 'normal', alliance: null, historySummary: '', isGameOver: false, gameOverReason: null
-=======
     gameId: '',
     currentDate: INITIAL_DATE,
     playerCountry: null,
@@ -180,24 +139,19 @@ const App: React.FC = () => {
     historySummary: '', // Init vide
     isGameOver: false,
     gameOverReason: null
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
   });
 
   const [eventQueue, setEventQueue] = useState<GameEvent[]>([]);
   const [fullHistory, setFullHistory] = useState<GameEvent[]>([]);
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
   
   // WINDOW MANAGEMENT
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
   const [activeWindow, setActiveWindow] = useState<'none' | 'events' | 'history' | 'chat' | 'alliance'>('none');
   const [hasUnreadChat, setHasUnreadChat] = useState(false);
   const [typingParticipants, setTypingParticipants] = useState<string[]>([]);
+  
+  // MAP CONTROL
   const [focusCountry, setFocusCountry] = useState<string | null>(null);
+
   const [playerInput, setPlayerInput] = useState("");
   const [pendingOrders, setPendingOrders] = useState<string[]>([]); 
   const [showStartModal, setShowStartModal] = useState(true);
@@ -205,19 +159,12 @@ const App: React.FC = () => {
 
   const isMountedRef = useRef(true);
 
+  // --- INIT & SPLASH LOGIC ---
   useEffect(() => {
     isMountedRef.current = true;
     const unsubscribe = subscribeToAuthChanges((u) => {
         if (!isMountedRef.current) return;
         setUser(u);
-<<<<<<< HEAD
-        if (u) { setAppMode('portal_dashboard'); setShowLoginModal(false); }
-        else { setAppMode('portal_landing'); setAvailableSaves([]); setHasSave(false); }
-=======
-<<<<<<< HEAD
-        if (u) { setAppMode('portal_dashboard'); setShowLoginModal(false); }
-        else { setAppMode('portal_landing'); setAvailableSaves([]); setHasSave(false); }
-=======
         if (u) {
             setAppMode('portal_dashboard');
             setShowLoginModal(false);
@@ -226,20 +173,10 @@ const App: React.FC = () => {
             setAvailableSaves([]);
             setHasSave(false);
         }
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
     });
     return () => { isMountedRef.current = false; unsubscribe(); };
   }, []);
 
-<<<<<<< HEAD
-  useEffect(() => {
-      if (!user || !db) { setAvailableSaves([]); setIsSyncing(false); return; }
-=======
-<<<<<<< HEAD
-  useEffect(() => {
-      if (!user || !db) { setAvailableSaves([]); setIsSyncing(false); return; }
-=======
   // --- REAL-TIME SAVE LISTENER ---
   useEffect(() => {
       if (!user || !db) {
@@ -247,99 +184,37 @@ const App: React.FC = () => {
           setIsSyncing(false);
           return;
       }
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
       setIsSyncing(true);
       const q = query(collection(db, "users", user.uid, "game_metas"));
       const unsubscribe = onSnapshot(q, (snapshot) => {
             const saves: SaveMetadata[] = [];
             snapshot.forEach((doc) => { saves.push(doc.data() as SaveMetadata); });
             saves.sort((a, b) => b.lastPlayed - a.lastPlayed);
-<<<<<<< HEAD
-            if (isMountedRef.current) { setAvailableSaves(saves); setHasSave(saves.length > 0); setIsSyncing(false); }
-=======
-<<<<<<< HEAD
-            if (isMountedRef.current) { setAvailableSaves(saves); setHasSave(saves.length > 0); setIsSyncing(false); }
-=======
             if (isMountedRef.current) {
                 setAvailableSaves(saves);
                 setHasSave(saves.length > 0);
                 setIsSyncing(false);
             }
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
         }, (error) => { console.error(error); if (isMountedRef.current) setIsSyncing(false); });
       return () => unsubscribe();
   }, [user]); 
 
-<<<<<<< HEAD
-  useEffect(() => {
-      if (appMode === 'game_active' && currentScreen === 'splash') {
-        const timer = setTimeout(() => { setCurrentScreen('loading'); }, 2000);
-=======
-<<<<<<< HEAD
-  useEffect(() => {
-      if (appMode === 'game_active' && currentScreen === 'splash') {
-        const timer = setTimeout(() => { setCurrentScreen('loading'); }, 2000);
-=======
   // Timers
   useEffect(() => {
       if (appMode === 'game_active' && currentScreen === 'splash') {
         const timer = setTimeout(() => { setCurrentScreen('loading'); }, 2500);
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
         return () => clearTimeout(timer);
       }
   }, [appMode, currentScreen]);
 
   useEffect(() => {
       if (appMode === 'game_active' && currentScreen === 'loading') {
-<<<<<<< HEAD
-        const timer = setTimeout(() => { setCurrentScreen('game'); }, 2000);
-=======
-<<<<<<< HEAD
-        const timer = setTimeout(() => { setCurrentScreen('game'); }, 2000);
-=======
         const timer = setTimeout(() => { setCurrentScreen('game'); }, 3000);
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
         return () => clearTimeout(timer);
       }
   }, [appMode, currentScreen]);
 
-  useEffect(() => {
-      const handleKeyDown = (e: KeyboardEvent) => {
-          if (e.key === 'Escape') {
-              if (activeWindow !== 'none') setActiveWindow('none');
-              else if (isSettingsOpen) setIsSettingsOpen(false);
-              else if (isLoadMenuOpen) setIsLoadMenuOpen(false);
-              else if (showKeyModal) setShowKeyModal(false);
-              else if (showBugReportModal) setShowBugReportModal(false);
-              else if (pendingCountry) setPendingCountry(null);
-          }
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeWindow, isSettingsOpen, isLoadMenuOpen, showKeyModal, showBugReportModal, pendingCountry]);
 
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
-  const toggleFullscreen = () => {
-      if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(e => console.error("Fullscreen error", e)); }
-      else { if (document.exitFullscreen) document.exitFullscreen(); }
-  };
-
-  const saveGame = async (state: GameState, history: GameEvent[], showNotif = true) => {
-      if (!user || !db) { showNotification("Connexion requise !"); if (!user) setShowLoginModal(true); return; }
-<<<<<<< HEAD
-      const metadata: SaveMetadata = {
-          id: state.gameId, country: state.playerCountry || "Inconnu", date: state.currentDate.toLocaleDateString('fr-FR'), turn: state.turn, lastPlayed: Date.now()
-      };
-      const sanitizedData = JSON.parse(JSON.stringify({ metadata, state, history, aiProvider }));
-=======
-=======
   // --- SAVE SYSTEM ---
   const saveGame = async (state: GameState, history: GameEvent[], showNotif = true) => {
       if (!user || !db) {
@@ -347,24 +222,25 @@ const App: React.FC = () => {
           if (!user) setShowLoginModal(true);
           return;
       }
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
       const metadata: SaveMetadata = {
-          id: state.gameId, country: state.playerCountry || "Inconnu", date: state.currentDate.toLocaleDateString('fr-FR'), turn: state.turn, lastPlayed: Date.now()
+          id: state.gameId,
+          country: state.playerCountry || "Inconnu",
+          date: state.currentDate.toLocaleDateString('fr-FR'),
+          turn: state.turn,
+          lastPlayed: Date.now()
       };
-<<<<<<< HEAD
-      const sanitizedData = JSON.parse(JSON.stringify({ metadata, state, history, aiProvider }));
-=======
       const fullData = { metadata, state, history, aiProvider };
       const sanitizedData = JSON.parse(JSON.stringify(fullData));
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
       try {
           const batch = writeBatch(db);
           batch.set(doc(db, "users", user.uid, "games", state.gameId), sanitizedData);
           batch.set(doc(db, "users", user.uid, "game_metas", state.gameId), metadata);
           await batch.commit();
           if (showNotif) showNotification("Sauvegarde Cloud réussie !");
-      } catch (e) { showNotification("Échec Sauvegarde Cloud"); }
+      } catch (e) {
+          console.error("Cloud save failed", e);
+          showNotification("Échec Sauvegarde Cloud");
+      }
   };
 
   const deleteSave = async (id: string) => {
@@ -385,132 +261,16 @@ const App: React.FC = () => {
           try {
               const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
               if (docSnap.exists()) data = docSnap.data();
-<<<<<<< HEAD
-          } catch (e) { showNotification("Erreur de chargement"); setIsGlobalLoading(false); return; }
-=======
-<<<<<<< HEAD
-          } catch (e) { showNotification("Erreur de chargement"); setIsGlobalLoading(false); return; }
-=======
           } catch (e) {
               console.error("Cloud load error", e);
               showNotification("Erreur de chargement (Réseau)");
               setIsGlobalLoading(false);
               return;
           }
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
       }
       if (data) {
           try {
               data.state.currentDate = new Date(data.state.currentDate);
-<<<<<<< HEAD
-              setGameState(data.state); setFullHistory(data.history); if (data.aiProvider) setAiProvider(data.aiProvider);
-              setEventQueue([]); setShowStartModal(false); setAppMode('game_active'); setCurrentScreen('loading'); setIsGlobalLoading(false); 
-              showNotification(`Partie chargée: ${data.state.playerCountry}`);
-          } catch (e) { showNotification("Erreur de sauvegarde (Corrompue)"); setIsGlobalLoading(false); }
-      } else { showNotification("Données introuvables."); setIsGlobalLoading(false); }
-      setIsSettingsOpen(false); setIsLoadMenuOpen(false);
-  };
-
-  const handleLogout = async () => { await logout(); showNotification("Déconnecté."); setAppMode('portal_landing'); };
-  const handleEmailAuth = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try { if (isRegistering) await registerWithEmail(authEmail, authPassword); else await loginWithEmail(authEmail, authPassword); }
-      catch (err: any) { showNotification("Erreur d'authentification."); }
-  };
-
-  // --- DIPLOMACY HANDLERS ---
-  /**
-   * Envoie un message diplomatique aux pays cibles et gère les réponses de l'IA.
-   */
-  const handleSendChatMessage = async (targets: string[], message: string) => {
-    if (!gameState.playerCountry) return;
-
-    // 1. Ajouter le message du joueur à l'historique
-    const playerMsg: ChatMessage = {
-      id: `chat-${Date.now()}-p`,
-      sender: 'player',
-      senderName: gameState.playerCountry,
-      targets: targets,
-      text: message,
-      timestamp: Date.now(),
-      isRead: true
-    };
-
-    setGameState(prev => ({
-      ...prev,
-      chatHistory: [...prev.chatHistory, playerMsg]
-    }));
-
-    // 2. Simuler les réponses de l'IA
-    const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
-    const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
-    const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
-
-    setTypingParticipants(targets);
-    
-    try {
-        const responses = await sendBatchDiplomaticMessage(
-            gameState.playerCountry,
-            targets,
-            message,
-            gameState.chatHistory,
-            effectiveProvider as any,
-=======
-<<<<<<< HEAD
-              setGameState(data.state); setFullHistory(data.history); if (data.aiProvider) setAiProvider(data.aiProvider);
-              setEventQueue([]); setShowStartModal(false); setAppMode('game_active'); setCurrentScreen('loading'); setIsGlobalLoading(false); 
-              showNotification(`Partie chargée: ${data.state.playerCountry}`);
-          } catch (e) { showNotification("Erreur de sauvegarde (Corrompue)"); setIsGlobalLoading(false); }
-      } else { showNotification("Données introuvables."); setIsGlobalLoading(false); }
-      setIsSettingsOpen(false); setIsLoadMenuOpen(false);
-  };
-
-  const handleLogout = async () => { await logout(); showNotification("Déconnecté."); setAppMode('portal_landing'); };
-  const handleEmailAuth = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try { if (isRegistering) await registerWithEmail(authEmail, authPassword); else await loginWithEmail(authEmail, authPassword); }
-      catch (err: any) { showNotification("Erreur d'authentification."); }
-  };
-
-  // --- DIPLOMACY HANDLERS ---
-  /**
-   * Envoie un message diplomatique aux pays cibles et gère les réponses de l'IA.
-   */
-  const handleSendChatMessage = async (targets: string[], message: string) => {
-    if (!gameState.playerCountry) return;
-
-    // 1. Ajouter le message du joueur à l'historique
-    const playerMsg: ChatMessage = {
-      id: `chat-${Date.now()}-p`,
-      sender: 'player',
-      senderName: gameState.playerCountry,
-      targets: targets,
-      text: message,
-      timestamp: Date.now(),
-      isRead: true
-    };
-
-    setGameState(prev => ({
-      ...prev,
-      chatHistory: [...prev.chatHistory, playerMsg]
-    }));
-
-    // 2. Simuler les réponses de l'IA
-    const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
-    const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
-    const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
-
-    setTypingParticipants(targets);
-    
-    try {
-        const responses = await sendBatchDiplomaticMessage(
-            gameState.playerCountry,
-            targets,
-            message,
-            gameState.chatHistory,
-            effectiveProvider as any,
-=======
               setGameState(data.state);
               setFullHistory(data.history);
               if (data.aiProvider) setAiProvider(data.aiProvider);
@@ -701,69 +461,10 @@ const App: React.FC = () => {
             message,
             updatedHistoryForContext,
             effectiveProvider,
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
             apiKeyToUse,
             modelToUse
         );
 
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
-        const newAiMessages: ChatMessage[] = Object.entries(responses)
-            .filter(([_, text]) => text !== "NO_RESPONSE")
-            .map(([country, text], idx) => ({
-                id: `chat-${Date.now()}-ai-${idx}`,
-                sender: 'ai',
-                senderName: country,
-                targets: [gameState.playerCountry!],
-                text: text,
-                timestamp: Date.now() + (idx * 10),
-                isRead: false
-            }));
-
-        if (newAiMessages.length > 0) {
-            setGameState(prev => ({
-                ...prev,
-                chatHistory: [...prev.chatHistory, ...newAiMessages]
-            }));
-            setHasUnreadChat(true);
-        }
-    } catch (e) {
-        console.error("Diplomacy error:", e);
-    } finally {
-        setTypingParticipants([]);
-    }
-<<<<<<< HEAD
-  };
-
-  /**
-   * Marque les messages d'une conversation spécifique comme lus.
-   */
-  const handleMarkRead = (targets: string[]) => {
-      setGameState(prev => {
-          const newHistory = prev.chatHistory.map(m => {
-              if (!m.isRead && m.sender !== 'player' && targets.includes(normalizeCountryName(m.senderName))) {
-                  return { ...m, isRead: true };
-              }
-              return m;
-          });
-=======
-  };
-
-  /**
-   * Marque les messages d'une conversation spécifique comme lus.
-   */
-  const handleMarkRead = (targets: string[]) => {
-      setGameState(prev => {
-          const newHistory = prev.chatHistory.map(m => {
-              if (!m.isRead && m.sender !== 'player' && targets.includes(normalizeCountryName(m.senderName))) {
-                  return { ...m, isRead: true };
-              }
-              return m;
-          });
-=======
         const newMessages: ChatMessage[] = [];
         
         // Parse responses map
@@ -802,59 +503,29 @@ const App: React.FC = () => {
           });
           const remainingUnread = newHistory.some(m => !m.isRead && m.sender !== 'player');
           setHasUnreadChat(remainingUnread);
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
           return { ...prev, chatHistory: newHistory };
       });
-      
-      // Mise à jour de l'état global de notification
-      setTimeout(() => {
-          setGameState(current => {
-              const stillUnread = current.chatHistory.some(m => !m.isRead && m.sender !== 'player');
-              setHasUnreadChat(stillUnread);
-              return current;
-          });
-      }, 0);
   };
 
+  // --- TURN PROCESSING ---
   const handleNextTurn = async () => {
     if (gameState.isProcessing || !gameState.playerCountry || gameState.isGameOver) return;
     setActiveWindow('none');
+
     const allOrders = [...pendingOrders];
     if (playerInput.trim()) allOrders.push(playerInput.trim());
     const finalOrderString = allOrders.join("\n");
     const formattedDate = gameState.currentDate.toLocaleDateString('fr-FR');
-<<<<<<< HEAD
-    const playerEvent: GameEvent = { id: `turn-${gameState.turn}-p`, date: formattedDate, type: 'player', headline: 'Mandat exécuté', description: finalOrderString || "Statu quo politique." };
-=======
-<<<<<<< HEAD
-    const playerEvent: GameEvent = { id: `turn-${gameState.turn}-p`, date: formattedDate, type: 'player', headline: 'Mandat exécuté', description: finalOrderString || "Statu quo politique." };
-=======
     
     const playerEvent: GameEvent = {
         id: `turn-${gameState.turn}-player`, date: formattedDate, type: 'player', headline: 'Décrets émis', description: finalOrderString || "Aucun ordre."
     };
 
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
     setGameState(prev => ({ ...prev, isProcessing: true }));
-    
-    const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
-    const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
-    const modelToUse = aiProvider === 'custom' ? customModelName : undefined;
 
-    let currentSummary = gameState.historySummary;
-    if (gameState.turn % 10 === 0 && fullHistory.length > 10) {
-        currentSummary = await generateHistorySummary(gameState.playerCountry, fullHistory, currentSummary, effectiveProvider, apiKeyToUse, modelToUse);
-    }
-<<<<<<< HEAD
-
-    const result = await simulateTurn(
-        gameState.playerCountry, formattedDate, finalOrderString, gameState.events, gameState.ownedTerritories,
-        gameState.mapEntities.map(e => `${e.label || e.type} en ${e.country}`), isCountryLandlocked(gameState.playerCountry), 
-        gameState.hasNuclear, gameState.chatHistory.slice(-10).map(m => m.text).join(' '), gameState.chaosLevel, 
-        effectiveProvider, apiKeyToUse, modelToUse, currentSummary
-=======
+    const entityDesc = gameState.mapEntities.map(e => `${e.label || e.type} en ${e.country}`);
+    const isLandlocked = isCountryLandlocked(gameState.playerCountry);
+    const recentChat = gameState.chatHistory.slice(-10).map(m => `${m.sender === 'player' ? 'Joueur' : m.senderName}: ${m.text}`).join(' | ');
 
     const effectiveProvider = aiProvider === 'custom' ? customProviderName : aiProvider;
     const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
@@ -870,14 +541,7 @@ const App: React.FC = () => {
 
     const result = await simulateTurn(
         gameState.playerCountry, formattedDate, finalOrderString, gameState.events, gameState.ownedTerritories,
-<<<<<<< HEAD
-        gameState.mapEntities.map(e => `${e.label || e.type} en ${e.country}`), isCountryLandlocked(gameState.playerCountry), 
-        gameState.hasNuclear, gameState.chatHistory.slice(-10).map(m => m.text).join(' '), gameState.chaosLevel, 
-        effectiveProvider, apiKeyToUse, modelToUse, currentSummary
-=======
         entityDesc, isLandlocked, gameState.hasNuclear, recentChat, gameState.chaosLevel, effectiveProvider, apiKeyToUse, modelToUse, currentSummary
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
     );
 
     const nextDate = new Date(gameState.currentDate);
@@ -886,273 +550,16 @@ const App: React.FC = () => {
     else nextDate.setMonth(nextDate.getMonth() + 1);
 
     const newAiEvents: GameEvent[] = result.events.map((e, idx) => ({
-<<<<<<< HEAD
-        id: `turn-${gameState.turn}-ai-${idx}`, date: nextDate.toLocaleDateString('fr-FR'), type: e.type, headline: e.headline, description: e.description, relatedCountry: e.relatedCountry
-=======
-<<<<<<< HEAD
-        id: `turn-${gameState.turn}-ai-${idx}`, date: nextDate.toLocaleDateString('fr-FR'), type: e.type, headline: e.headline, description: e.description, relatedCountry: e.relatedCountry
-=======
         id: `turn-${gameState.turn}-ai-${idx}`, date: nextDate.toLocaleDateString('fr-FR'), type: e.type,
         headline: e.headline, description: e.description, relatedCountry: e.relatedCountry
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
     }));
 
     let newOwnedTerritories = [...gameState.ownedTerritories];
     let newEntities = [...gameState.mapEntities];
     let newHasNuclear = gameState.hasNuclear;
+    let cameraTarget = gameState.playerCountry;
+
     if (result.mapUpdates) {
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
-        result.mapUpdates.forEach(upd => {
-            if (upd.type === 'annexation') {
-                const target = upd.targetCountry; const owner = upd.newOwner || gameState.playerCountry;
-                if (owner === gameState.playerCountry && !newOwnedTerritories.includes(target)) { newOwnedTerritories.push(target); if (hasNuclearArsenal(target)) newHasNuclear = true; }
-                else if (owner !== gameState.playerCountry) { newOwnedTerritories = newOwnedTerritories.filter(t => t !== target); }
-<<<<<<< HEAD
-            }
-            if (['build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'build_base', 'troop_deployment'].includes(upd.type)) {
-                newEntities.push({ id: `ent-${Date.now()}-${Math.random()}`, type: upd.type as MapEntityType, country: upd.targetCountry, lat: upd.lat || 0, lng: upd.lng || 0, label: upd.label });
-            }
-        });
-    }
-
-    const newGameState = {
-        ...gameState, currentDate: nextDate, turn: gameState.turn + 1, ownedTerritories: newOwnedTerritories, mapEntities: newEntities,
-        globalTension: Math.max(0, Math.min(100, gameState.globalTension + result.globalTensionChange)),
-        economyHealth: Math.max(0, Math.min(100, gameState.economyHealth + result.economyHealthChange)),
-        militaryPower: Math.max(0, Math.min(100, gameState.militaryPower + result.militaryPowerChange)),
-        popularity: Math.max(0, Math.min(100, gameState.popularity + (result.popularityChange || 0))),
-        corruption: Math.max(0, Math.min(100, gameState.corruption + (result.corruptionChange || 0))),
-        hasNuclear: newHasNuclear, isProcessing: false, historySummary: currentSummary
-    };
-    setGameState(newGameState); setEventQueue([playerEvent, ...newAiEvents]); setFullHistory(prev => [...prev, playerEvent, ...newAiEvents]);
-    setPlayerInput(""); setPendingOrders([]); setFocusCountry(newAiEvents[0]?.relatedCountry || gameState.playerCountry);
-    setActiveWindow('events'); saveGame(newGameState, fullHistory, false);
-  };
-
-  const showNotification = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
-  const launchGeoSim = () => { setGameState({ ...gameState, gameId: Date.now().toString(), playerCountry: null }); setAppMode('game_active'); setCurrentScreen('splash'); };
-
-  if (appMode === 'portal_landing') return (
-    <div className="min-h-screen bg-white text-slate-900 font-sans flex flex-col items-center justify-center p-6">
-        <GameLogo size="large" theme="light" />
-        <p className="mt-8 text-xl text-slate-500 max-w-md text-center">Prenez le contrôle d'une nation en l'an 2000 et affrontez l'intelligence artificielle mondiale.</p>
-        <button onClick={user ? () => setAppMode('portal_dashboard') : () => setShowLoginModal(true)} className="mt-10 px-10 py-5 bg-black text-white rounded-2xl font-bold text-xl shadow-2xl hover:scale-105 transition-transform">COMMENCER ➔</button>
-        {showLoginModal && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl p-8 max-w-sm w-full border shadow-2xl">
-                    <h3 className="text-2xl font-bold mb-6">{isRegistering ? "Rejoindre GeoSim" : "Connexion Tactique"}</h3>
-                    <form onSubmit={handleEmailAuth} className="space-y-4">
-                        <input type="email" placeholder="Email" required className="w-full p-3 rounded-lg border bg-slate-50" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)}/>
-                        <input type="password" placeholder="Mot de passe" required className="w-full p-3 rounded-lg border bg-slate-50" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}/>
-                        <button type="submit" className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg">{isRegistering ? "S'inscrire" : "Se connecter"}</button>
-                    </form>
-                    <button onClick={() => setIsRegistering(!isRegistering)} className="mt-4 text-xs text-blue-600 block mx-auto font-bold">{isRegistering ? "Déjà membre ?" : "Créer un compte"}</button>
-                    <button onClick={() => setShowLoginModal(false)} className="mt-4 w-full py-2 text-stone-400 font-bold">Annuler</button>
-                </div>
-            </div>
-        )}
-    </div>
-  );
-
-  if (appMode === 'portal_dashboard') return (
-    <div className="min-h-screen bg-slate-50 p-6 md:p-10 flex flex-col items-center">
-        <header className="w-full max-w-6xl flex justify-between items-center mb-10">
-            <h1 className="text-3xl font-black uppercase">QG POLITIKA</h1>
-            <div className="flex gap-4">
-                <button onClick={() => setIsLoadMenuOpen(true)} className="px-4 py-2 bg-white border rounded-lg font-bold shadow-sm">📂 Sauvegardes</button>
-                <button onClick={handleLogout} className="p-2 text-red-500">Déconnexion</button>
-            </div>
-        </header>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-6xl">
-            <div className="bg-white p-8 rounded-3xl border shadow-xl flex flex-col items-center text-center cursor-pointer hover:shadow-2xl transition-all" onClick={launchGeoSim}>
-                <div className="text-6xl mb-4">🌍</div>
-                <h2 className="text-2xl font-bold mb-2">GeoSim An 2000</h2>
-                <p className="text-slate-500 mb-6">Simulation mondiale dynamique. Tout est possible.</p>
-                <button className="w-full py-4 bg-black text-white font-bold rounded-xl">NOUVELLE PARTIE</button>
-            </div>
-            {availableSaves.length > 0 && (
-                <div className="bg-white p-8 rounded-3xl border shadow-xl overflow-y-auto max-h-[400px]">
-                    <h2 className="text-xl font-bold mb-4">Continuer</h2>
-                    <div className="space-y-4">
-                        {availableSaves.map(s => (
-                            <div key={s.id} className="flex items-center justify-between p-4 border rounded-xl hover:bg-slate-50 cursor-pointer" onClick={() => loadGameById(s.id)}>
-                                <div><div className="font-bold">{s.country}</div><div className="text-xs text-slate-400">Tour {s.turn} • {s.date}</div></div>
-                                <span className="text-blue-600 font-bold">➔</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-        {isLoadMenuOpen && (
-            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
-                    <h3 className="text-xl font-bold mb-4">Charger une simulation</h3>
-                    <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
-                        {availableSaves.map(s => (
-                            <div key={s.id} className="p-3 border rounded-lg flex justify-between items-center">
-                                <div><div className="font-bold">{s.country}</div><div className="text-[10px] uppercase">{s.date}</div></div>
-                                <button onClick={() => loadGameById(s.id)} className="bg-blue-600 text-white px-3 py-1 rounded text-xs">Charger</button>
-                            </div>
-                        ))}
-                    </div>
-                    <button onClick={() => setIsLoadMenuOpen(false)} className="mt-4 w-full py-2 bg-stone-100 rounded font-bold text-stone-500">Retour</button>
-                </div>
-            </div>
-        )}
-    </div>
-  );
-
-  if (appMode === 'game_active') {
-    if (currentScreen === 'splash') return (<div className="w-screen h-screen bg-white flex items-center justify-center animate-fade-in"><GameLogo /></div>);
-    if (currentScreen === 'loading') return (<div className="w-screen h-screen bg-slate-900 flex flex-col items-center justify-center text-white"><div className="w-48 h-1 bg-white/20 rounded-full overflow-hidden mb-4"><div className="h-full bg-blue-500 animate-[width_2s_ease-in-out]"></div></div><div className="text-xs uppercase tracking-widest animate-pulse">Initialisation Satellite...</div></div>);
-
-    return (
-        <div className="relative w-screen h-screen overflow-hidden bg-stone-900 font-sans">
-            <NewsTicker text={eventQueue.length > 0 ? eventQueue[0].headline : (fullHistory.length > 0 ? fullHistory[fullHistory.length-1].headline : "GeoSim : Millénaire An 2000")} />
-            <div className="absolute inset-0 z-0 pt-8"><WorldMap playerCountry={gameState.playerCountry} ownedTerritories={gameState.ownedTerritories} mapEntities={gameState.mapEntities} onRegionClick={(c) => { if(!gameState.playerCountry) { setPendingCountry(c); setShowStartModal(true); } }} focusCountry={focusCountry}/></div>
-            
-            {showStartModal && !gameState.playerCountry && (
-                <div className="absolute inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-                        {!pendingCountry ? (<p className="font-bold">Sélectionnez une nation sur la carte.</p>) : (
-                            <>
-                                <h2 className="text-3xl font-black mb-4 uppercase">{pendingCountry}</h2>
-                                <p className="text-slate-500 mb-6">Souhaitez-vous prendre le contrôle de cette nation ?</p>
-                                <div className="flex gap-2">
-                                    <button onClick={() => setPendingCountry(null)} className="flex-1 py-3 bg-stone-100 rounded-lg">Non</button>
-                                    <button onClick={() => { setGameState({ ...gameState, playerCountry: pendingCountry }); setShowStartModal(false); setFocusCountry(pendingCountry); }} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-xl">Prendre le commandement</button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
-
-=======
-            }
-            if (['build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'build_base', 'troop_deployment'].includes(upd.type)) {
-                newEntities.push({ id: `ent-${Date.now()}-${Math.random()}`, type: upd.type as MapEntityType, country: upd.targetCountry, lat: upd.lat || 0, lng: upd.lng || 0, label: upd.label });
-            }
-        });
-    }
-
-    const newGameState = {
-        ...gameState, currentDate: nextDate, turn: gameState.turn + 1, ownedTerritories: newOwnedTerritories, mapEntities: newEntities,
-        globalTension: Math.max(0, Math.min(100, gameState.globalTension + result.globalTensionChange)),
-        economyHealth: Math.max(0, Math.min(100, gameState.economyHealth + result.economyHealthChange)),
-        militaryPower: Math.max(0, Math.min(100, gameState.militaryPower + result.militaryPowerChange)),
-        popularity: Math.max(0, Math.min(100, gameState.popularity + (result.popularityChange || 0))),
-        corruption: Math.max(0, Math.min(100, gameState.corruption + (result.corruptionChange || 0))),
-        hasNuclear: newHasNuclear, isProcessing: false, historySummary: currentSummary
-    };
-    setGameState(newGameState); setEventQueue([playerEvent, ...newAiEvents]); setFullHistory(prev => [...prev, playerEvent, ...newAiEvents]);
-    setPlayerInput(""); setPendingOrders([]); setFocusCountry(newAiEvents[0]?.relatedCountry || gameState.playerCountry);
-    setActiveWindow('events'); saveGame(newGameState, fullHistory, false);
-  };
-
-  const showNotification = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
-  const launchGeoSim = () => { setGameState({ ...gameState, gameId: Date.now().toString(), playerCountry: null }); setAppMode('game_active'); setCurrentScreen('splash'); };
-
-  if (appMode === 'portal_landing') return (
-    <div className="min-h-screen bg-white text-slate-900 font-sans flex flex-col items-center justify-center p-6">
-        <GameLogo size="large" theme="light" />
-        <p className="mt-8 text-xl text-slate-500 max-w-md text-center">Prenez le contrôle d'une nation en l'an 2000 et affrontez l'intelligence artificielle mondiale.</p>
-        <button onClick={user ? () => setAppMode('portal_dashboard') : () => setShowLoginModal(true)} className="mt-10 px-10 py-5 bg-black text-white rounded-2xl font-bold text-xl shadow-2xl hover:scale-105 transition-transform">COMMENCER ➔</button>
-        {showLoginModal && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl p-8 max-w-sm w-full border shadow-2xl">
-                    <h3 className="text-2xl font-bold mb-6">{isRegistering ? "Rejoindre GeoSim" : "Connexion Tactique"}</h3>
-                    <form onSubmit={handleEmailAuth} className="space-y-4">
-                        <input type="email" placeholder="Email" required className="w-full p-3 rounded-lg border bg-slate-50" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)}/>
-                        <input type="password" placeholder="Mot de passe" required className="w-full p-3 rounded-lg border bg-slate-50" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}/>
-                        <button type="submit" className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg">{isRegistering ? "S'inscrire" : "Se connecter"}</button>
-                    </form>
-                    <button onClick={() => setIsRegistering(!isRegistering)} className="mt-4 text-xs text-blue-600 block mx-auto font-bold">{isRegistering ? "Déjà membre ?" : "Créer un compte"}</button>
-                    <button onClick={() => setShowLoginModal(false)} className="mt-4 w-full py-2 text-stone-400 font-bold">Annuler</button>
-                </div>
-            </div>
-        )}
-    </div>
-  );
-
-  if (appMode === 'portal_dashboard') return (
-    <div className="min-h-screen bg-slate-50 p-6 md:p-10 flex flex-col items-center">
-        <header className="w-full max-w-6xl flex justify-between items-center mb-10">
-            <h1 className="text-3xl font-black uppercase">QG POLITIKA</h1>
-            <div className="flex gap-4">
-                <button onClick={() => setIsLoadMenuOpen(true)} className="px-4 py-2 bg-white border rounded-lg font-bold shadow-sm">📂 Sauvegardes</button>
-                <button onClick={handleLogout} className="p-2 text-red-500">Déconnexion</button>
-            </div>
-        </header>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-6xl">
-            <div className="bg-white p-8 rounded-3xl border shadow-xl flex flex-col items-center text-center cursor-pointer hover:shadow-2xl transition-all" onClick={launchGeoSim}>
-                <div className="text-6xl mb-4">🌍</div>
-                <h2 className="text-2xl font-bold mb-2">GeoSim An 2000</h2>
-                <p className="text-slate-500 mb-6">Simulation mondiale dynamique. Tout est possible.</p>
-                <button className="w-full py-4 bg-black text-white font-bold rounded-xl">NOUVELLE PARTIE</button>
-            </div>
-            {availableSaves.length > 0 && (
-                <div className="bg-white p-8 rounded-3xl border shadow-xl overflow-y-auto max-h-[400px]">
-                    <h2 className="text-xl font-bold mb-4">Continuer</h2>
-                    <div className="space-y-4">
-                        {availableSaves.map(s => (
-                            <div key={s.id} className="flex items-center justify-between p-4 border rounded-xl hover:bg-slate-50 cursor-pointer" onClick={() => loadGameById(s.id)}>
-                                <div><div className="font-bold">{s.country}</div><div className="text-xs text-slate-400">Tour {s.turn} • {s.date}</div></div>
-                                <span className="text-blue-600 font-bold">➔</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-        {isLoadMenuOpen && (
-            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
-                    <h3 className="text-xl font-bold mb-4">Charger une simulation</h3>
-                    <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
-                        {availableSaves.map(s => (
-                            <div key={s.id} className="p-3 border rounded-lg flex justify-between items-center">
-                                <div><div className="font-bold">{s.country}</div><div className="text-[10px] uppercase">{s.date}</div></div>
-                                <button onClick={() => loadGameById(s.id)} className="bg-blue-600 text-white px-3 py-1 rounded text-xs">Charger</button>
-                            </div>
-                        ))}
-                    </div>
-                    <button onClick={() => setIsLoadMenuOpen(false)} className="mt-4 w-full py-2 bg-stone-100 rounded font-bold text-stone-500">Retour</button>
-                </div>
-            </div>
-        )}
-    </div>
-  );
-
-  if (appMode === 'game_active') {
-    if (currentScreen === 'splash') return (<div className="w-screen h-screen bg-white flex items-center justify-center animate-fade-in"><GameLogo /></div>);
-    if (currentScreen === 'loading') return (<div className="w-screen h-screen bg-slate-900 flex flex-col items-center justify-center text-white"><div className="w-48 h-1 bg-white/20 rounded-full overflow-hidden mb-4"><div className="h-full bg-blue-500 animate-[width_2s_ease-in-out]"></div></div><div className="text-xs uppercase tracking-widest animate-pulse">Initialisation Satellite...</div></div>);
-
-    return (
-        <div className="relative w-screen h-screen overflow-hidden bg-stone-900 font-sans">
-            <NewsTicker text={eventQueue.length > 0 ? eventQueue[0].headline : (fullHistory.length > 0 ? fullHistory[fullHistory.length-1].headline : "GeoSim : Millénaire An 2000")} />
-            <div className="absolute inset-0 z-0 pt-8"><WorldMap playerCountry={gameState.playerCountry} ownedTerritories={gameState.ownedTerritories} mapEntities={gameState.mapEntities} onRegionClick={(c) => { if(!gameState.playerCountry) { setPendingCountry(c); setShowStartModal(true); } }} focusCountry={focusCountry}/></div>
-            
-            {showStartModal && !gameState.playerCountry && (
-                <div className="absolute inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-                        {!pendingCountry ? (<p className="font-bold">Sélectionnez une nation sur la carte.</p>) : (
-                            <>
-                                <h2 className="text-3xl font-black mb-4 uppercase">{pendingCountry}</h2>
-                                <p className="text-slate-500 mb-6">Souhaitez-vous prendre le contrôle de cette nation ?</p>
-                                <div className="flex gap-2">
-                                    <button onClick={() => setPendingCountry(null)} className="flex-1 py-3 bg-stone-100 rounded-lg">Non</button>
-                                    <button onClick={() => { setGameState({ ...gameState, playerCountry: pendingCountry }); setShowStartModal(false); setFocusCountry(pendingCountry); }} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-xl">Prendre le commandement</button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-=======
         for (const update of result.mapUpdates) {
             // TRAITEMENT DES SUPPRESSIONS
             if (update.type === 'remove_entity') {
@@ -1436,70 +843,10 @@ const App: React.FC = () => {
                     <div className="relative"><button onClick={() => toggleWindow('chat')} className={`w-14 h-14 rounded-full shadow-xl border-2 transition-transform flex items-center justify-center hover:scale-105 active:scale-95 ${activeWindow === 'chat' ? 'bg-blue-50 border-blue-400 text-blue-600' : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'}`} title="Diplomatie"><span className="text-2xl">💬</span></button>{hasUnreadChat && (<div className="absolute top-0 right-0 w-4 h-4 bg-red-500 border-2 border-white rounded-full animate-pulse"></div>)}</div>
                     <button onClick={() => toggleWindow('history')} className={`w-14 h-14 rounded-full shadow-xl border-2 transition-transform flex items-center justify-center hover:scale-105 active:scale-95 ${activeWindow === 'history' ? 'bg-blue-50 border-blue-400 text-blue-600' : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'}`} title="Archives"><span className="text-2xl">📚</span></button>
                     {gameState.alliance && (<button onClick={() => toggleWindow('alliance')} className={`w-14 h-14 rounded-full shadow-xl border-2 transition-transform flex items-center justify-center hover:scale-105 active:scale-95 animate-fade-in ${activeWindow === 'alliance' ? 'bg-blue-50 border-blue-400 text-blue-600' : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'}`} title="Alliance"><span className="text-2xl">🤝</span></button>)}
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
                 </div>
-            )}
+            </>
+        )}
 
-<<<<<<< HEAD
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
-            {gameState.playerCountry && !gameState.isGameOver && (
-                <>
-                    <div className="absolute top-12 left-4 z-20 flex gap-2 bg-stone-900/80 p-2 rounded-lg border border-white/10 backdrop-blur-md shadow-2xl">
-                        {['Tension', 'Économie', 'Popularité', 'Militaire'].map(stat => (
-                            <div key={stat} className="flex flex-col gap-1 w-16">
-                                <span className="text-[8px] uppercase text-white/50 font-bold">{stat}</span>
-                                <div className="h-1 bg-white/10 rounded-full overflow-hidden"><div className="h-full bg-blue-400" style={{width: '50%'}}></div></div>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="absolute bottom-6 left-6 z-20 flex gap-4">
-                        <button onClick={() => setActiveWindow(activeWindow === 'events' ? 'none' : 'events')} className={`w-14 h-14 rounded-full shadow-2xl border-2 flex items-center justify-center transition-all ${activeWindow === 'events' ? 'bg-blue-600 border-white text-white' : 'bg-white border-stone-200 text-stone-700'}`}>📝</button>
-                        <button onClick={() => setActiveWindow(activeWindow === 'chat' ? 'none' : 'chat')} className={`w-14 h-14 rounded-full shadow-2xl border-2 flex items-center justify-center transition-all ${activeWindow === 'chat' ? 'bg-blue-600 border-white text-white' : 'bg-white border-stone-200 text-stone-700'}`}>💬</button>
-                        <button onClick={() => setActiveWindow(activeWindow === 'history' ? 'none' : 'history')} className="w-14 h-14 bg-white rounded-full shadow-2xl border-2 border-stone-200 flex items-center justify-center">📚</button>
-                        <button onClick={() => setIsSettingsOpen(true)} className="w-14 h-14 bg-stone-800 rounded-full shadow-2xl border-2 border-white/20 flex items-center justify-center text-white">⚙️</button>
-                    </div>
-                    <DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing}/>
-                </>
-            )}
-
-            <EventLog isOpen={activeWindow === 'events'} onClose={() => setActiveWindow('none')} eventQueue={eventQueue} onReadEvent={() => { setFullHistory(prev => [...prev, eventQueue[0]]); setEventQueue(eventQueue.slice(1)); }} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={() => { setPendingOrders([...pendingOrders, playerInput]); setPlayerInput(""); }} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={() => getStrategicSuggestions(gameState.playerCountry!, fullHistory, aiProvider)} turn={gameState.turn}/>
-            <HistoryLog isOpen={activeWindow === 'history'} onClose={() => setActiveWindow('none')} history={fullHistory}/>
-            <ChatInterface 
-                isOpen={activeWindow === 'chat'} 
-                onClose={() => setActiveWindow('none')} 
-                playerCountry={gameState.playerCountry!} 
-                chatHistory={gameState.chatHistory} 
-                onSendMessage={async (t, m) => { 
-                    showNotification("Transmission diplomatique..."); 
-                    await handleSendChatMessage(t, m); 
-                }} 
-                isProcessing={gameState.isProcessing} 
-                allCountries={ALL_COUNTRIES_LIST}
-                typingParticipants={typingParticipants}
-                onMarkRead={handleMarkRead}
-            />
-            {notification && (<div className="fixed top-12 left-1/2 -translate-x-1/2 z-[60] bg-stone-900 text-white px-6 py-2 rounded-full shadow-2xl font-bold text-xs animate-fade-in-down">{notification}</div>)}
-            
-            {isSettingsOpen && (
-                <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl">
-                        <h3 className="text-2xl font-black mb-6 uppercase tracking-tight">Poste de Contrôle</h3>
-                        <div className="space-y-4">
-                            <button onClick={toggleFullscreen} className="w-full py-3 bg-stone-100 rounded-xl font-bold">Plein Écran ⛶</button>
-                            <button onClick={() => saveGame(gameState, fullHistory)} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl shadow-lg">Sauvegarder Cloud ☁️</button>
-                            <button onClick={() => setAppMode('portal_dashboard')} className="w-full py-3 text-red-500 font-bold">Quitter au Dashboard</button>
-                            <button onClick={() => setIsSettingsOpen(false)} className="w-full py-4 bg-black text-white font-bold rounded-xl">REPRENDRE</button>
-<<<<<<< HEAD
-                        </div>
-                    </div>
-                </div>
-            )}
-=======
-                        </div>
-                    </div>
-                </div>
-            )}
-=======
         {isSettingsOpen && (
             <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-stone-100 rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-stone-300 overflow-y-auto max-h-[90vh]">
@@ -1600,8 +947,6 @@ const App: React.FC = () => {
         {isLoadMenuOpen && renderLoadMenuOverlay()}
         {notification && (<div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2"><span className="text-emerald-400">✓</span> {notification}</div>)}
         {gameState.playerCountry && !gameState.isGameOver && (<DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing}/>)}
->>>>>>> a04885da5dfee789ee0824969a7e7dd0d764f34f
->>>>>>> 3262acac328e01f3a28e02750067f632382e6c53
         </div>
     );
   }
