@@ -2,13 +2,13 @@ import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel } from "../types";
 
 // --- CONFIGURATION ---
-// On retire l'instance globale 'ai' pour la créer dynamiquement selon la clé
 const DEFAULT_API_KEY = process.env.API_KEY;
-const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || "";
+const GROQ_API_KEY_ENV = process.env.VITE_GROQ_API_KEY || "";
 
-export type AIProvider = 'gemini' | 'groq' | 'custom';
+// On étend le type pour inclure openai
+export type AIProvider = 'gemini' | 'groq' | 'openai' | 'custom';
 
-// Helper pour obtenir l'instance avec la bonne clé
+// Helper pour obtenir l'instance Gemini avec la bonne clé
 const getAIClient = (customKey?: string) => {
     return new GoogleGenAI({ apiKey: customKey || DEFAULT_API_KEY });
 };
@@ -24,7 +24,6 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
         const errString = JSON.stringify(error);
         const errMsg = error?.message || "";
         
-        // Check for 429
         if (
             error?.status === 429 || 
             error?.code === 429 ||
@@ -36,7 +35,6 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
             isRateLimit = true;
         }
 
-        // Check for 503
         if (
             error?.status === 503 || 
             error?.code === 503 ||
@@ -50,7 +48,6 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
 
         if (retries > 0 && (isRateLimit || isServerOverload)) {
             console.warn(`API Busy/Overloaded. Retrying in ${delay}ms... (${retries} attempts left)`);
-            // Add jitter
             const jitter = Math.random() * 500;
             await new Promise(r => setTimeout(r, delay + jitter));
             return withRetry(fn, retries - 1, delay * 2);
@@ -59,15 +56,13 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
     }
 };
 
-// --- HELPER: ROBUST GENERATION WITH MODEL FALLBACK ---
+// --- HELPER: ROBUST GEMINI GENERATION ---
 const generateRobustContent = async (
     prompt: string, 
     config: any,
     apiKey?: string
 ): Promise<any> => {
     const aiClient = getAIClient(apiKey);
-
-    // 1. Try Primary Model (Flash 2.5)
     try {
         return await withRetry(async () => {
             return await aiClient.models.generateContent({
@@ -77,9 +72,7 @@ const generateRobustContent = async (
             });
         }, 3, 2000);
     } catch (error) {
-        console.warn("Primary model (Flash 2.5) failed. Switching to fallback (Flash Lite)...", error);
-        
-        // 2. Try Fallback Model (Flash Lite)
+        console.warn("Primary model (Flash 2.5) failed. Switching to fallback...", error);
         try {
             return await withRetry(async () => {
                 return await aiClient.models.generateContent({
@@ -95,7 +88,7 @@ const generateRobustContent = async (
     }
 };
 
-// --- INSTRUCTIONS UNIFIÉES ET RENFORCÉES ---
+// --- INSTRUCTIONS UNIFIÉES ---
 const SYSTEM_INSTRUCTION = `
 ROLE: Tu es le "Moteur de Réalité" d'une simulation géopolitique complexe (GeoSim).
 CONTEXTE: Jeu vidéo de stratégie "Grand Strategy".
@@ -122,7 +115,6 @@ RÈGLES D'OR POUR L'IA (CRITIQUE):
 Format de réponse attendu : JSON UNIQUEMENT.
 `;
 
-// Schema definition for Groq (JSON)
 const RESPONSE_SCHEMA_JSON = {
     type: "object",
     properties: {
@@ -132,7 +124,7 @@ const RESPONSE_SCHEMA_JSON = {
         items: {
           type: "object",
           properties: {
-            type: { type: "string", enum: ["player", "world", "crisis", "economy", "war", "alliance"] }, // Added 'player'
+            type: { type: "string", enum: ["player", "world", "crisis", "economy", "war", "alliance"] },
             headline: { type: "string" },
             description: { type: "string" },
             relatedCountry: { type: "string" }
@@ -188,24 +180,60 @@ const RESPONSE_SCHEMA_JSON = {
       required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
 };
 
-// --- GROQ HELPER ---
-const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
+// --- OPENAI HELPER ---
+const callOpenAI = async (prompt: string, system: string, apiKey: string, jsonMode: boolean = true): Promise<string> => {
     try {
-        if (!GROQ_API_KEY) {
-            throw new Error("Clé API Groq manquante.");
+        let systemContent = system;
+        if (jsonMode) {
+             systemContent += "\n\nCRITIQUE: REPONDS UNIQUEMENT EN JSON VALIDE. SCHEMA:\n" + JSON.stringify(RESPONSE_SCHEMA_JSON);
         }
+
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                messages: [
+                    { role: "system", content: systemContent },
+                    { role: "user", content: prompt }
+                ],
+                model: "gpt-4o", // Utilisation de GPT-4o par défaut pour meilleure qualité
+                temperature: 0.8,
+                max_tokens: 2048,
+                response_format: jsonMode ? { type: "json_object" } : undefined
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(`OpenAI Error: ${JSON.stringify(err)}`);
+        }
+
+        const data = await response.json();
+        return data.choices[0]?.message?.content || "";
+    } catch (e) {
+        console.error("OpenAI Call Failed:", e);
+        throw e;
+    }
+};
+
+// --- GROQ HELPER ---
+const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, apiKey?: string): Promise<string> => {
+    try {
+        const keyToUse = apiKey || GROQ_API_KEY_ENV;
+        if (!keyToUse) throw new Error("Clé API Groq manquante.");
 
         let systemContent = system;
         if (jsonMode) {
-             const schemaToUse = schema || RESPONSE_SCHEMA_JSON;
-             // Llama 3 needs strong JSON reinforcement
-             systemContent += "\n\nCRITIQUE: TU DOIS REPONDRE UNIQUEMENT AVEC UN JSON VALIDE. PAS DE MARKDOWN (```json). PAS DE COMMENTAIRES.\nSCHEMA OBLIGATOIRE:\n" + JSON.stringify(schemaToUse);
+             systemContent += "\n\nCRITIQUE: TU DOIS REPONDRE UNIQUEMENT AVEC UN JSON VALIDE. PAS DE MARKDOWN. SCHEMA OBLIGATOIRE:\n" + JSON.stringify(RESPONSE_SCHEMA_JSON);
         }
 
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                "Authorization": `Bearer ${keyToUse}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
@@ -214,7 +242,7 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
                     { role: "user", content: prompt }
                 ],
                 model: "llama-3.3-70b-versatile",
-                temperature: 0.75, // Increased slightly for more creativity/chaos
+                temperature: 0.75,
                 max_tokens: 2048,
                 response_format: jsonMode ? { type: "json_object" } : undefined
             })
@@ -244,7 +272,7 @@ export const simulateTurn = async (
   hasNuclear: boolean = false,
   diplomaticContext: string = "",
   chaosLevel: ChaosLevel = 'normal',
-  provider: AIProvider = 'gemini',
+  provider: string = 'gemini', // Changed type to string to support custom values
   customApiKey?: string
 ): Promise<SimulationResponse> => {
   
@@ -281,7 +309,28 @@ export const simulateTurn = async (
     Sois créatif. Surprends le joueur. Ne sois pas passif.
   `;
 
-  // Gemini Schema
+  // --- OPENAI ROUTING ---
+  if (provider === 'openai' && customApiKey) {
+      try {
+          const jsonStr = await callOpenAI(prompt, SYSTEM_INSTRUCTION, customApiKey, true);
+          return JSON.parse(jsonStr) as SimulationResponse;
+      } catch (error) {
+          console.error("OpenAI error", error);
+          // Fallback handled below
+      }
+  }
+
+  // --- GROQ ROUTING ---
+  if (provider === 'groq') {
+      try {
+          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, customApiKey);
+          return JSON.parse(jsonStr) as SimulationResponse;
+      } catch (error) {
+          console.warn("Groq failed, fallback to Gemini.", error);
+      }
+  } 
+  
+  // --- GEMINI (DEFAULT) ---
   const geminiSchema: Schema = {
       type: Type.OBJECT,
       properties: {
@@ -291,7 +340,7 @@ export const simulateTurn = async (
           items: {
           type: Type.OBJECT,
           properties: {
-              type: { type: Type.STRING, enum: ["player", "world", "crisis", "economy", "war", "alliance"] }, // Added 'player'
+              type: { type: Type.STRING, enum: ["player", "world", "crisis", "economy", "war", "alliance"] },
               headline: { type: Type.STRING },
               description: { type: Type.STRING },
               relatedCountry: { type: Type.STRING }
@@ -347,26 +396,13 @@ export const simulateTurn = async (
       required: ["timeIncrement", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
   };
 
-  if (provider === 'groq') {
-      if (GROQ_API_KEY) {
-          try {
-              const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, RESPONSE_SCHEMA_JSON);
-              return JSON.parse(jsonStr) as SimulationResponse;
-          } catch (error) {
-              console.warn("Groq failed, fallback to Gemini.", error);
-          }
-      } else {
-          console.warn("Groq Key missing. Fallback Gemini.");
-      }
-  } 
-  
   try {
       const response = await generateRobustContent(prompt, {
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: geminiSchema,
-          temperature: chaosLevel === 'chaos' ? 0.95 : 0.8, // Increased temperature for Gemini too
-      }, customApiKey);
+          temperature: chaosLevel === 'chaos' ? 0.95 : 0.8,
+      }, customApiKey); // Use custom key if provider is 'gemini' and key provided (or fallback logic in App.tsx)
       const text = response.text;
       if (!text) throw new Error("No AI response");
       return JSON.parse(text) as SimulationResponse;
@@ -383,7 +419,7 @@ export const sendDiplomaticMessage = async (
     message: string,
     history: ChatMessage[],
     context: { militaryPower: number; economyHealth: number; globalTension: number; hasNuclear: boolean; },
-    provider: AIProvider = 'gemini',
+    provider: string = 'gemini',
     customApiKey?: string
 ): Promise<string | null> => {
     
@@ -411,9 +447,16 @@ export const sendDiplomaticMessage = async (
     Réponse (1-2 phrases max) :
     `;
 
-    if (provider === 'groq' && GROQ_API_KEY) {
+    if (provider === 'openai' && customApiKey) {
         try {
-            const text = await callGroq(prompt, "Tu es un chef d'état réaliste. Réponds directement. Pas de préambule.", false);
+            const text = await callOpenAI(prompt, "Tu es un chef d'état. Réponds directement.", customApiKey, false);
+            return text.trim() === "NO_RESPONSE" ? null : text;
+        } catch (e) { console.warn("OpenAI failed."); }
+    }
+
+    if (provider === 'groq') {
+        try {
+            const text = await callGroq(prompt, "Tu es un chef d'état réaliste. Réponds directement. Pas de préambule.", false, customApiKey);
             return text.trim() === "NO_RESPONSE" ? null : text;
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
     }
@@ -421,7 +464,7 @@ export const sendDiplomaticMessage = async (
     try {
         const response = await generateRobustContent(prompt, {
             temperature: 0.7
-        }, customApiKey);
+        }, provider === 'gemini' ? customApiKey : undefined);
         const text = response.text?.trim();
         return text === "NO_RESPONSE" ? null : text || "Reçu.";
     } catch (e) {
@@ -446,7 +489,7 @@ const getFallbackResponse = (): SimulationResponse => ({
 export const getStrategicSuggestions = async (
     playerCountry: string,
     recentHistory: GameEvent[],
-    provider: AIProvider = 'gemini',
+    provider: string = 'gemini',
     customApiKey?: string
 ): Promise<string[]> => {
     
@@ -459,9 +502,17 @@ export const getStrategicSuggestions = async (
     Format JSON: {"suggestions": ["action 1", "action 2", "action 3"]}
     `;
 
-    if (provider === 'groq' && GROQ_API_KEY) {
+    if (provider === 'openai' && customApiKey) {
         try {
-            const json = await callGroq(prompt, "Conseiller stratégique (Realpolitik). JSON uniquement.", true, { type: "object", properties: { suggestions: { type: "array", items: { type: "string" } } } });
+            const json = await callOpenAI(prompt, "Conseiller stratégique. JSON uniquement.", customApiKey, true);
+            const p = JSON.parse(json);
+            return p.suggestions || p;
+        } catch (e) { console.warn("OpenAI failed."); }
+    }
+
+    if (provider === 'groq') {
+        try {
+            const json = await callGroq(prompt, "Conseiller stratégique (Realpolitik). JSON uniquement.", true, customApiKey);
             const p = JSON.parse(json);
             return p.suggestions || p;
         } catch (e) { console.warn("Groq failed, fallback to Gemini."); }
@@ -473,7 +524,7 @@ export const getStrategicSuggestions = async (
              responseMimeType: "application/json", 
              responseSchema: schema,
              temperature: 0.8
-        }, customApiKey);
+        }, provider === 'gemini' ? customApiKey : undefined);
         return JSON.parse(response.text || "[]") as string[];
     } catch (e) { return ["Renforcer l'armée", "Négocier une alliance", "Développer l'économie"]; }
 }
