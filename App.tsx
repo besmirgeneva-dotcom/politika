@@ -14,6 +14,7 @@ import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc
 
 const INITIAL_DATE = new Date('2000-01-01');
 
+// --- TYPES FOR SAVE SYSTEM ---
 interface SaveMetadata {
     id: string;
     country: string;
@@ -81,10 +82,15 @@ const App: React.FC = () => {
   const [hasSave, setHasSave] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
   const [isSyncing, setIsSyncing] = useState(true);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
+  const [showBugReportModal, setShowBugReportModal] = useState(false);
+  const [bugTitle, setBugTitle] = useState("");
+  const [bugDescription, setBugDescription] = useState("");
+  const [isSendingBug, setIsSendingBug] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
@@ -251,6 +257,7 @@ const App: React.FC = () => {
           setIsGlobalLoading(false); 
       }
       setIsSettingsOpen(false);
+      setIsLoadMenuOpen(false);
   };
 
   const showNotification = (msg: string) => {
@@ -273,6 +280,22 @@ const App: React.FC = () => {
       } catch (err: any) { showNotification("Erreur d'authentification."); }
   };
   const handleLogout = async () => { await logout(); setAppMode('portal_landing'); };
+  const handleLogin = () => { setAppMode('portal_landing'); setShowLoginModal(true); };
+
+  const handleSendBugReport = async () => {
+      if (!bugTitle.trim() || !bugDescription.trim()) return;
+      setIsSendingBug(true);
+      try {
+          if (db) {
+              await addDoc(collection(db, "bug_reports"), {
+                  title: bugTitle, description: bugDescription, userEmail: user?.email, userId: user?.uid, timestamp: Date.now(), status: 'new'
+              });
+          }
+          showNotification("Signalement envoyé");
+      } catch (e) { showNotification("Erreur d'envoi"); } finally {
+          setIsSendingBug(false); setShowBugReportModal(false); setBugTitle(""); setBugDescription("");
+      }
+  };
 
   const launchGeoSim = () => {
       setGameState({
