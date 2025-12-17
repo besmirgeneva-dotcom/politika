@@ -9,7 +9,7 @@ import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
 import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeToAuthChanges, db } from './services/authService';
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, limit, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, onSnapshot } from 'firebase/firestore';
 
 const INITIAL_DATE = new Date('2000-01-01');
 
@@ -207,13 +207,9 @@ const App: React.FC = () => {
       setIsSyncing(true);
 
       // Subscribe to "game_metas" collection
-      // order by lastPlayed descending to show newest first
-      const q = query(
-          collection(db, "users", user.uid, "game_metas"),
-          limit(20) // Only get the last 20 games to keep it fast
-          // Note: ordering might require a compound index in Firestore console if strictly enforced,
-          // but usually works for small collections or we sort client side.
-      );
+      // REMOVED 'limit(20)' to avoid "disappearing saves" if indexes are messy
+      // We load all metadata (lightweight) and sort client-side.
+      const q = query(collection(db, "users", user.uid, "game_metas"));
 
       const unsubscribe = onSnapshot(q, 
         (snapshot) => {
@@ -221,7 +217,7 @@ const App: React.FC = () => {
             snapshot.forEach((doc) => {
                 saves.push(doc.data() as SaveMetadata);
             });
-            // Sort client-side to ensure order without index errors initially
+            // Sort client-side to ensure order without index errors
             saves.sort((a, b) => b.lastPlayed - a.lastPlayed);
             
             if (isMountedRef.current) {
@@ -279,7 +275,7 @@ const App: React.FC = () => {
       };
       
       const fullData = { metadata, state, history, aiProvider };
-      // Sanitize: removes 'undefined' fields
+      // Sanitize: removes 'undefined' fields which cause Firestore errors
       const sanitizedData = JSON.parse(JSON.stringify(fullData));
 
       try {
@@ -297,8 +293,6 @@ const App: React.FC = () => {
           await batch.commit();
 
           if (showNotif) showNotification("Sauvegarde Cloud réussie !");
-          
-          // No need to manually refresh, the onSnapshot listener handles it!
       } catch (e) {
           console.error("Cloud save failed", e);
           showNotification("Échec Sauvegarde Cloud");
@@ -313,7 +307,7 @@ const App: React.FC = () => {
           batch.delete(doc(db, "users", user.uid, "games", id));
           batch.delete(doc(db, "users", user.uid, "game_metas", id));
           await batch.commit();
-          // No manual refresh needed
+          // No manual refresh needed, snapshot listener handles it
       } catch (e) { console.error("Cloud delete failed", e); }
   };
 
@@ -325,9 +319,7 @@ const App: React.FC = () => {
 
       if (user && db) {
           try {
-              // Standard fetch for the full game data
               const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
-              
               if (docSnap.exists()) {
                   data = docSnap.data();
               }
