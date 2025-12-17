@@ -89,48 +89,122 @@ export const ALL_COUNTRIES_LIST = Object.keys(COUNTRY_ISO).sort();
 // --- AI CORRECTIONS & NORMALIZATION ---
 // Mapping pour corriger les erreurs fréquentes de l'IA (Anglais/Abréviations -> Français Standard)
 export const AI_NAME_CORRECTIONS: Record<string, string> = {
-    "USA": "États-Unis",
-    "United States": "États-Unis",
-    "United States of America": "États-Unis",
-    "US": "États-Unis",
-    "America": "États-Unis",
-    "UK": "Royaume-Uni",
-    "United Kingdom": "Royaume-Uni",
-    "Great Britain": "Royaume-Uni",
-    "England": "Royaume-Uni",
-    "Russia": "Russie",
-    "China": "Chine",
-    "Germany": "Allemagne",
-    "Italy": "Italie",
-    "Spain": "Espagne",
-    "Japan": "Japon",
-    "South Korea": "Corée du Sud",
-    "North Korea": "Corée du Nord",
-    "Brazil": "Brésil",
-    "India": "Inde",
-    "Turkey": "Turquie",
-    "Poland": "Pologne",
-    "Ukraine": "Ukraine",
-    "France": "France",
+    // Amérique
+    "USA": "États-Unis", "United States": "États-Unis", "United States of America": "États-Unis", "US": "États-Unis", "America": "États-Unis",
     "Canada": "Canada",
-    "Australia": "Australie",
+    "Brazil": "Brésil", "Brasil": "Brésil",
+    "Mexico": "Mexique",
+    "Argentina": "Argentine",
+    "Colombia": "Colombie",
+    "Peru": "Pérou",
+    "Venezuela": "Venezuela",
+    "Chile": "Chili",
+    "Ecuador": "Équateur",
+    "Bolivia": "Bolivie",
+    "Paraguay": "Paraguay",
+    "Uruguay": "Uruguay",
+    "Cuba": "Cuba",
+    "Haiti": "Haïti",
+
+    // Europe
+    "UK": "Royaume-Uni", "United Kingdom": "Royaume-Uni", "Great Britain": "Royaume-Uni", "England": "Royaume-Uni", "Britain": "Royaume-Uni",
+    "France": "France",
+    "Germany": "Allemagne", "Deutschland": "Allemagne",
+    "Italy": "Italie", "Italia": "Italie",
+    "Spain": "Espagne", "Espana": "Espagne",
+    "Portugal": "Portugal",
+    "Greece": "Grèce", "Hellas": "Grèce",
+    "Netherlands": "Pays-Bas", "The Netherlands": "Pays-Bas", "Holland": "Pays-Bas",
+    "Belgium": "Belgique",
+    "Switzerland": "Suisse", "Swiss": "Suisse",
+    "Austria": "Autriche",
+    "Poland": "Pologne",
+    "Sweden": "Suède",
+    "Norway": "Norvège",
+    "Finland": "Finlande",
+    "Denmark": "Danemark",
+    "Ireland": "Irlande",
+    "Iceland": "Islande",
+    "Czech Republic": "Tchéquie", "Czechia": "Tchéquie",
+    "Hungary": "Hongrie",
+    "Romania": "Roumanie",
+    "Bulgaria": "Bulgarie",
+    "Serbia": "Serbie", "Republic of Serbia": "Serbie",
+    "Croatia": "Croatie",
+    "Bosnia": "Bosnie-Herzégovine", "Bosnia and Herzegovina": "Bosnie-Herzégovine",
+    "Slovenia": "Slovénie",
+    "Slovakia": "Slovaquie",
+    "Montenegro": "Monténégro",
+    "Albania": "Albanie",
+    "Macedonia": "Macédoine du Nord", "North Macedonia": "Macédoine du Nord", "Republic of Macedonia": "Macédoine du Nord",
+    "Kosovo": "Kosovo", "Republic of Kosovo": "Kosovo",
+    "Ukraine": "Ukraine",
+    "Belarus": "Biélorussie",
+    "Moldova": "Moldavie",
+    "Russia": "Russie", "Russian Federation": "Russie",
+
+    // Asie & Moyen-Orient
+    "China": "Chine", "PRC": "Chine",
+    "Japan": "Japon",
+    "India": "Inde",
+    "South Korea": "Corée du Sud", "Korea, South": "Corée du Sud", "Republic of Korea": "Corée du Sud",
+    "North Korea": "Corée du Nord", "Korea, North": "Corée du Nord", "DPRK": "Corée du Nord",
+    "Vietnam": "Vietnam",
+    "Thailand": "Thaïlande",
+    "Indonesia": "Indonésie",
+    "Malaysia": "Malaisie",
+    "Philippines": "Philippines",
+    "Singapore": "Singapour",
+    "Pakistan": "Pakistan",
+    "Afghanistan": "Afghanistan",
     "Iran": "Iran",
+    "Iraq": "Irak",
+    "Saudi Arabia": "Arabie saoudite", "Saudi": "Arabie saoudite",
+    "Turkey": "Turquie", "Turkiye": "Turquie",
     "Israel": "Israël",
-    "Egypt": "Égypte"
+    "Syria": "Syrie",
+    "Lebanon": "Liban",
+    "Jordan": "Jordanie",
+    "Egypt": "Égypte",
+    "Taiwan": "Taïwan",
+
+    // Afrique
+    "South Africa": "Afrique du Sud",
+    "Nigeria": "Nigéria",
+    "Kenya": "Kenya",
+    "Ethiopia": "Éthiopie",
+    "Morocco": "Maroc",
+    "Algeria": "Algérie",
+    "Tunisia": "Tunisie",
+    "Libya": "Libye",
+    "Sudan": "Soudan",
+    "Congo": "Congo", "DRC": "République démocratique du Congo",
+
+    // Océanie
+    "Australia": "Australie",
+    "New Zealand": "Nouvelle-Zélande"
 };
 
 export const normalizeCountryName = (name: string): string => {
+    if (!name) return "";
+    
     // 1. Check exact match in corrections
     if (AI_NAME_CORRECTIONS[name]) return AI_NAME_CORRECTIONS[name];
     
-    // 2. Try simple fuzzy match (if name is "The USA" etc)
-    const upper = name.toUpperCase();
-    for (const [key, val] of Object.entries(AI_NAME_CORRECTIONS)) {
-        if (upper === key.toUpperCase()) return val;
+    // 2. Try case-insensitive match
+    const keys = Object.keys(AI_NAME_CORRECTIONS);
+    const lowerName = name.toLowerCase();
+    for (const key of keys) {
+        if (key.toLowerCase() === lowerName) {
+            return AI_NAME_CORRECTIONS[key];
+        }
     }
 
-    // 3. Fallback: If it exists in ALL_COUNTRIES_LIST, return as is, otherwise capitalize or return
-    // (We assume if it's not in corrections, the AI might have got it right or it's an edge case)
+    // 3. Check if name is already a valid French name in our list
+    // This avoids double correction or failing valid names
+    if (COUNTRY_ISO[name]) return name;
+
+    // 4. Fallback: Return original
     return name;
 };
 

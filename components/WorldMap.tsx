@@ -1,58 +1,63 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { MapContainer, GeoJSON, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { MapEntity } from '../types';
 import { getFrenchName } from '../constants'; // Importation de la fonction centralisée
 
 // --- CUSTOM DOT MARKERS ---
-const createDotIcon = (color: string, label: string | undefined, type: string, showLabel: boolean) => L.divIcon({
+// Modifié pour accepter du HTML brut pour les listes et réduire la taille
+const createGroupedIcon = (color: string, labelHtml: string, showLabel: boolean, count: number) => L.divIcon({
   className: 'custom-dot-marker',
   html: `
     <div style="position: relative; width: 0; height: 0;">
       <!-- The Dot -->
       <div style="
         position: absolute;
-        left: -5px; top: -5px;
-        width: 12px; height: 12px; 
-        background-color: ${color}; 
+        left: -4px; top: -4px;
+        width: 8px; height: 8px; 
+        background-color: ${count > 1 ? '#ffffff' : color}; 
         border-radius: 50%; 
-        border: 2px solid white; 
-        box-shadow: 0 1px 3px rgba(0,0,0,0.6);
+        border: 2px solid ${color}; 
+        box-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        z-index: 20;
       "></div>
       
-      <!-- Icon Inside Dot (Optional, simplified) -->
-      
-      <!-- The Label (Conditional) -->
+      <!-- The Label / List -->
       ${showLabel ? `
       <div style="
         position: absolute; 
-        left: 10px; top: -8px; 
-        white-space: nowrap; 
-        font-size: 10px; 
+        left: 8px; top: -6px; 
+        font-size: 9px; 
+        line-height: 11px;
         font-weight: bold; 
-        background-color: rgba(0,0,0,0.8); 
+        background-color: rgba(0,0,0,0.85); 
         color: white; 
-        padding: 2px 5px; 
-        border-radius: 4px;
+        padding: 3px 5px; 
+        border-radius: 3px;
         pointer-events: none;
         text-shadow: 0 0 2px black;
         z-index: 10;
         border: 1px solid ${color};
-      ">${label || getEntityLabel(type)}</div>
+        white-space: nowrap;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: max-content;
+      ">${labelHtml}</div>
       ` : ''}
     </div>
   `,
-  iconSize: [0, 0], // Logic handled in HTML
+  iconSize: [0, 0],
   iconAnchor: [0, 0]
 });
 
-const getEntityLabel = (type: string) => {
+const getEntityLabel = (type: string, customLabel?: string) => {
+    if (customLabel) return customLabel;
     switch(type) {
-        case 'factory': return '🏭 Usine';
-        case 'port': return '⚓ Port';
-        case 'military_airport': return '✈️ Aéroport Mil.';
-        case 'airbase': return '🛫 Base Aérienne';
-        case 'defense': return '🛡️ Défense';
+        case 'military_base': return 'Base Militaire';
+        case 'airbase': return 'Base Aérienne';
+        case 'defense': return 'Défense';
+        case 'troops': return 'Contingent';
         default: return type;
     }
 }
@@ -60,11 +65,10 @@ const getEntityLabel = (type: string) => {
 // Color mapping for entity types
 const getEntityColor = (type: string) => {
     switch(type) {
-        case 'factory': return '#f59e0b'; // Amber (Usine)
-        case 'port': return '#0ea5e9'; // Sky Blue (Port)
-        case 'military_airport': return '#6366f1'; // Indigo (Aéroport Mil)
-        case 'airbase': return '#dc2626'; // Red (Base Aérienne)
-        case 'defense': return '#10b981'; // Emerald (Défense)
+        case 'military_base': return '#ef4444'; // Red (Base)
+        case 'airbase': return '#3b82f6'; // Blue (Air)
+        case 'defense': return '#10b981'; // Green (Defense)
+        case 'troops': return '#f59e0b'; // Amber (Troops)
         default: return '#64748b';
     }
 };
@@ -405,12 +409,44 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     };
   };
 
-  const showMarkerLabels = zoom > 5;
+  // Affichage des étiquettes des marqueurs (points) uniquement au zoom max (10)
+  // CHANGEMENT: Textes visibles à partir de zoom 9
+  const showMarkerLabels = zoom >= 9;
+
+  // --- LOGIC: GROUP ENTITIES BY POSITION ---
+  const groupedEntities = useMemo(() => {
+    const groups: Record<string, { pos: [number, number], entities: MapEntity[] }> = {};
+
+    const getEntityPosition = (entity: MapEntity): [number, number] => {
+        if (entity.lat !== 0 || entity.lng !== 0) return [entity.lat, entity.lng];
+        
+        const override = LABEL_OVERRIDES[entity.country];
+        if (override) return override;
+        
+        const c = centers.find(x => x.name === entity.country);
+        if (c) return c.center;
+        
+        if (CAPITAL_DATA[entity.country]) return CAPITAL_DATA[entity.country].coords;
+        return [0, 0];
+    };
+
+    mapEntities
+        // FILTRAGE STRICT : SEULS CES TYPES APPARAISSENT SUR LA CARTE
+        .filter(entity => ['military_base', 'airbase', 'defense', 'troops'].includes(entity.type))
+        .forEach(entity => {
+            const pos = getEntityPosition(entity);
+            const key = `${pos[0].toFixed(3)},${pos[1].toFixed(3)}`; // Tolerance for grouping
+            if (!groups[key]) groups[key] = { pos, entities: [] };
+            groups[key].entities.push(entity);
+        });
+
+    return Object.values(groups);
+  }, [mapEntities, centers]);
 
   return (
     <div className="w-full h-full absolute inset-0 z-0 bg-stone-900">
       <MapContainer 
-        center={[20, 0]} zoom={3} scrollWheelZoom={true} minZoom={2} maxZoom={8}
+        center={[20, 0]} zoom={3} scrollWheelZoom={true} minZoom={2} maxZoom={10}
         maxBounds={[[-90, -180], [90, 180]]} zoomControl={false} attributionControl={false}
         className="outline-none bg-stone-900 h-full w-full"
       >
@@ -423,30 +459,40 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
 
         <MapLabels zoom={zoom} visibleCountries={centers} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
 
-        {mapEntities
-          .filter(entity => ['port', 'military_airport', 'airbase', 'defense'].includes(entity.type))
-          .map((entity) => {
-            let pos: [number, number] = [entity.lat, entity.lng];
-            if (pos[0] === 0 && pos[1] === 0) {
-                const override = LABEL_OVERRIDES[entity.country];
-                if (override) pos = override;
-                else {
-                    const c = centers.find(x => x.name === entity.country);
-                    if (c) pos = c.center;
-                    else if (CAPITAL_DATA[entity.country]) pos = CAPITAL_DATA[entity.country].coords;
-                }
-            }
+        {/* CHANGEMENT: Les points (sans texte) s'affichent dès le zoom 8 */}
+        {zoom >= 8 && groupedEntities.map((group, idx) => {
+            const count = group.entities.length;
+            const primaryEntity = group.entities[0];
+            const color = getEntityColor(primaryEntity.type); // Color of the first, or logic for mixed
             
-            const color = getEntityColor(entity.type);
-            const icon = createDotIcon(color, entity.label, entity.type, showMarkerLabels);
+            // Generate HTML for label
+            let labelHtml = "";
+            if (count === 1) {
+                labelHtml = getEntityLabel(primaryEntity.type, primaryEntity.label);
+            } else {
+                // List view
+                labelHtml = group.entities.map(e => `
+                    <div style="display: flex; align-items: center; gap: 3px;">
+                        <span style="width: 4px; height: 4px; background-color: ${getEntityColor(e.type)}; border-radius: 50%; flex-shrink: 0;"></span>
+                        <span>${getEntityLabel(e.type, e.label)}</span>
+                    </div>
+                `).join('');
+            }
+
+            const icon = createGroupedIcon(color, labelHtml, showMarkerLabels, count);
 
             return (
-                <Marker key={entity.id} position={pos} icon={icon} zIndexOffset={500}>
+                <Marker key={`group-${idx}`} position={group.pos} icon={icon} zIndexOffset={500 + count}>
                     {!showMarkerLabels && (
                         <Popup>
-                            <div className="text-center">
-                                <strong className="uppercase text-xs block mb-1" style={{color: color}}>{getEntityLabel(entity.type)}</strong>
-                                <span className="text-xs text-stone-600">{entity.country}</span>
+                            <div className="text-left">
+                                <div className="text-xs text-stone-600 mb-1 font-bold">{primaryEntity.country}</div>
+                                {group.entities.map((e, i) => (
+                                    <div key={i} className="text-xs flex items-center gap-2 mb-0.5">
+                                        <span style={{width: 6, height: 6, borderRadius: '50%', backgroundColor: getEntityColor(e.type)}}></span>
+                                        <span>{getEntityLabel(e.type, e.label)}</span>
+                                    </div>
+                                ))}
                             </div>
                         </Popup>
                     )}

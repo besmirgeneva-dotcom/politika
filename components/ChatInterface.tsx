@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChatMessage } from '../types';
-import { getFlagUrl } from '../constants';
+import { getFlagUrl, normalizeCountryName } from '../constants';
 
 interface ChatInterfaceProps {
   isOpen: boolean;
@@ -42,7 +42,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const getParticipants = (msg: ChatMessage): string[] => {
     const raw = msg.sender === 'player' ? [...msg.targets] : [msg.senderName, ...msg.targets];
     const flat: string[] = [];
-    raw.forEach(s => s.split(',').forEach(sub => flat.push(sub.trim())));
+    // NORMALIZE HERE to ensure "Greece" and "Grèce" map to the same thread
+    raw.forEach(s => s.split(',').forEach(sub => flat.push(normalizeCountryName(sub.trim()))));
     const unique = Array.from(new Set(flat.filter(p => p !== playerCountry && p !== '')));
     return unique.sort();
   };
@@ -97,6 +98,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [chatHistory, activeParticipants, viewMode, typingParticipants]);
+
+  // NEW: Auto-mark read when chat history updates while viewing a chat
+  useEffect(() => {
+    if (viewMode === 'chat' && activeParticipants.length > 0 && onMarkRead) {
+         // Check if there are unread messages for this chat
+         const hasUnread = chatHistory.some(m => 
+            !m.isRead && 
+            m.sender !== 'player' && 
+            activeParticipants.includes(normalizeCountryName(m.senderName))
+         );
+         if (hasUnread) {
+             onMarkRead(activeParticipants);
+         }
+    }
+  }, [chatHistory, viewMode, activeParticipants, onMarkRead]);
 
   // Reset view when closed
   useEffect(() => {
