@@ -69,17 +69,19 @@ const generateRobustContent = async (
     try {
         return await withRetry(async () => {
             return await aiClient.models.generateContent({
-                model: "gemini-2.5-flash",
+                // UTILISATION DU MODÈLE STABLE 1.5 FLASH (Compatible toutes clés)
+                model: "gemini-1.5-flash", 
                 contents: prompt,
                 config: config
             });
         }, 3, 2000);
     } catch (error) {
-        console.warn("Primary model (Flash 2.5) failed. Switching to fallback...", error);
+        console.warn("Primary model (Flash 1.5) failed. Switching to fallback...", error);
         try {
             return await withRetry(async () => {
                 return await aiClient.models.generateContent({
-                    model: "gemini-2.5-flash-lite-latest",
+                    // FALLBACK SUR FLASH-8B (Version légère et rapide)
+                    model: "gemini-1.5-flash-8b",
                     contents: prompt,
                     config: config
                 });
