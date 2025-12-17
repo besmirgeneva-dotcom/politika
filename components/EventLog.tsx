@@ -32,7 +32,8 @@ const EventLog: React.FC<EventLogProps> = ({
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [hasFetchedThisTurn, setHasFetchedThisTurn] = useState(false);
 
-  // Reset suggestions when the turn changes
+  // RESET LOGIC: Critical for token saving.
+  // We ensure suggestions are cleared every turn and ONLY fetched on user click.
   useEffect(() => {
     setSuggestions([]);
     setHasFetchedThisTurn(false);
@@ -43,13 +44,19 @@ const EventLog: React.FC<EventLogProps> = ({
   const currentEvent = eventQueue.length > 0 ? eventQueue[0] : null;
 
   const handleFetchSuggestions = async () => {
+      // Security check to prevent multiple calls per turn
       if (hasFetchedThisTurn) return;
       
       setLoadingSuggestions(true);
-      const res = await onGetSuggestions();
-      setSuggestions(res);
-      setLoadingSuggestions(false);
-      setHasFetchedThisTurn(true);
+      try {
+        const res = await onGetSuggestions();
+        setSuggestions(res);
+      } catch (e) {
+        setSuggestions(["Impossible de contacter les conseillers."]);
+      } finally {
+        setLoadingSuggestions(false);
+        setHasFetchedThisTurn(true);
+      }
   };
 
   const applySuggestion = (text: string) => {
@@ -162,7 +169,7 @@ const EventLog: React.FC<EventLogProps> = ({
                         {suggestions.length > 0 && (
                             <div className="bg-blue-50 p-2 rounded-lg border border-blue-100 my-2 animate-fade-in-up">
                                 <div className="text-[9px] font-bold text-blue-500 uppercase mb-1 flex items-center gap-1">
-                                    <span>💡</span> Suggestions IA
+                                    <span>💡</span> Suggestions IA (Générées)
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     {suggestions.map((s, i) => (
@@ -197,8 +204,9 @@ const EventLog: React.FC<EventLogProps> = ({
                                     ? 'bg-stone-200 text-stone-400 border-stone-300 cursor-not-allowed'
                                     : 'bg-yellow-100 hover:bg-yellow-200 text-yellow-700 border-yellow-300'
                                 }`}
+                                title="Générer des stratégies via IA (Coût Tokens)"
                             >
-                                {loadingSuggestions ? '...' : hasFetchedThisTurn ? 'Max 1' : '💡 Idées'}
+                                {loadingSuggestions ? 'Analyses...' : hasFetchedThisTurn ? 'Max 1/tour' : '💡 Demander Stratégies'}
                             </button>
                         </div>
                         
