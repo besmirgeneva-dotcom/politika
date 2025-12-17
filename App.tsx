@@ -109,7 +109,14 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoadMenuOpen, setIsLoadMenuOpen] = useState(false);
   const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
+  
+  // AI Settings
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
+  // CUSTOM AI KEY LOGIC
+  const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('custom_gemini_key') || "");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [tempKey, setTempKey] = useState("");
+
   const [isSyncing, setIsSyncing] = useState(true); // Default to true until listener loads
   const [isGlobalLoading, setIsGlobalLoading] = useState(false); // NEW: Global loading state for heavy ops
 
@@ -410,6 +417,29 @@ const App: React.FC = () => {
       setShowLoginModal(true);
   };
 
+  // --- CUSTOM API KEY HANDLERS ---
+  const handleOpenKeyModal = () => {
+      setTempKey(customApiKey || "");
+      setShowKeyModal(true);
+  };
+
+  const handleSaveCustomKey = () => {
+      if (!tempKey.trim()) return;
+      setCustomApiKey(tempKey.trim());
+      localStorage.setItem('custom_gemini_key', tempKey.trim());
+      setAiProvider('custom'); // Auto select custom when adding
+      setShowKeyModal(false);
+      showNotification("Clé API Personnelle sauvegardée !");
+  };
+
+  const handleRemoveCustomKey = () => {
+      setCustomApiKey("");
+      localStorage.removeItem('custom_gemini_key');
+      setAiProvider('gemini');
+      setShowKeyModal(false);
+      showNotification("Clé supprimée. Retour à la clé par défaut.");
+  };
+
   // --- BUG REPORTING ---
   const handleSendBugReport = async () => {
       if (!bugTitle.trim() || !bugDescription.trim()) {
@@ -531,6 +561,14 @@ const App: React.FC = () => {
         return { ...prev, events: updatedEvents };
     });
     setEventQueue(newQueue);
+
+    // FIX: Update focus to the NEXT event's country
+    if (newQueue.length > 0 && newQueue[0].relatedCountry) {
+        setFocusCountry(newQueue[0].relatedCountry);
+    } else if (newQueue.length === 0 && gameState.playerCountry) {
+        // Return to player country when done reading
+        setFocusCountry(gameState.playerCountry);
+    }
   };
 
   const handleAddOrder = () => {
@@ -541,7 +579,9 @@ const App: React.FC = () => {
 
   const handleGetSuggestions = async () => {
       if (!gameState.playerCountry) return [];
-      return await getStrategicSuggestions(gameState.playerCountry, fullHistory, aiProvider);
+      // Pass custom key if provider is set to custom
+      const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
+      return await getStrategicSuggestions(gameState.playerCountry, fullHistory, aiProvider, apiKeyToUse);
   }
 
   // --- DIPLOMATIC CHAT HANDLER ---
@@ -573,6 +613,9 @@ const App: React.FC = () => {
       };
       const updatedHistoryForContext = [...gameState.chatHistory, userMsg];
 
+      // Pass custom key if provider is set to custom
+      const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
+
       try {
         const aiPromises = targets.map(async (targetCountry) => {
             const responseText = await sendDiplomaticMessage(
@@ -582,7 +625,8 @@ const App: React.FC = () => {
                 message,
                 updatedHistoryForContext,
                 context,
-                aiProvider
+                aiProvider,
+                apiKeyToUse
             );
             setTypingParticipants(prev => prev.filter(p => p !== targetCountry));
             if (!responseText) return null;
@@ -669,6 +713,9 @@ const App: React.FC = () => {
     const isLandlocked = isCountryLandlocked(gameState.playerCountry);
     const recentChat = gameState.chatHistory.slice(-10).map(m => `${m.sender === 'player' ? 'Joueur' : m.senderName}: ${m.text}`).join(' | ');
 
+    // Pass custom key if provider is set to custom
+    const apiKeyToUse = aiProvider === 'custom' ? customApiKey : undefined;
+
     const result = await simulateTurn(
         gameState.playerCountry,
         formattedDate,
@@ -680,7 +727,8 @@ const App: React.FC = () => {
         gameState.hasNuclear,
         recentChat,
         gameState.chaosLevel,
-        aiProvider
+        aiProvider,
+        apiKeyToUse
     );
 
     // ... (processing results)
@@ -1580,18 +1628,34 @@ const App: React.FC = () => {
                     <div className="space-y-4">
                         <div>
                             <label className="block text-xs font-bold uppercase text-stone-500 mb-2">Moteur IA</label>
-                            <div className="flex bg-stone-200 rounded-lg p-1">
+                            <div className="flex flex-col gap-2">
+                                <div className="flex bg-stone-200 rounded-lg p-1">
+                                    <button 
+                                        onClick={() => setAiProvider('gemini')}
+                                        className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'gemini' ? 'bg-white shadow text-blue-600' : 'text-stone-500'}`}
+                                    >
+                                        Gemini
+                                    </button>
+                                    <button 
+                                        onClick={() => setAiProvider('groq')}
+                                        className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'groq' ? 'bg-white shadow text-orange-600' : 'text-stone-500'}`}
+                                    >
+                                        Groq
+                                    </button>
+                                    {customApiKey && (
+                                        <button 
+                                            onClick={() => setAiProvider('custom')}
+                                            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'custom' ? 'bg-white shadow text-emerald-600' : 'text-stone-500'}`}
+                                        >
+                                            Gemini (Perso)
+                                        </button>
+                                    )}
+                                </div>
                                 <button 
-                                    onClick={() => setAiProvider('gemini')}
-                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'gemini' ? 'bg-white shadow text-blue-600' : 'text-stone-500'}`}
+                                    onClick={handleOpenKeyModal}
+                                    className="text-xs text-blue-600 font-bold underline text-center"
                                 >
-                                    Google Gemini
-                                </button>
-                                <button 
-                                    onClick={() => setAiProvider('groq')}
-                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'groq' ? 'bg-white shadow text-orange-600' : 'text-stone-500'}`}
-                                >
-                                    Groq (Llama 3)
+                                    {customApiKey ? "Modifier ma clé API" : "+ Ajouter une clé API (Gemini)"}
                                 </button>
                             </div>
                         </div>
@@ -1630,6 +1694,48 @@ const App: React.FC = () => {
                 </div>
             </div>
         )}
+        
+        {/* CUSTOM KEY MODAL */}
+        {showKeyModal && (
+            <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-stone-300 animate-fade-in-up">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-bold text-stone-800 flex items-center gap-2">
+                            <span>🔑</span> Clé API Personnelle
+                        </h3>
+                        <button onClick={() => setShowKeyModal(false)} className="text-stone-400 hover:text-stone-600 font-bold">✕</button>
+                    </div>
+                    <p className="text-xs text-stone-500 mb-4">
+                        Utilisez votre propre clé Google Gemini pour éviter les limites de quota de la version gratuite.
+                        <br/><a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-blue-600 underline">Obtenir une clé ici</a>.
+                    </p>
+                    <input 
+                        type="text" 
+                        value={tempKey}
+                        onChange={(e) => setTempKey(e.target.value)}
+                        placeholder="AIzaSy..."
+                        className="w-full p-3 rounded-lg border border-stone-300 focus:outline-blue-500 bg-stone-50 text-sm font-mono mb-4"
+                    />
+                    <div className="flex gap-2">
+                        {customApiKey && (
+                            <button 
+                                onClick={handleRemoveCustomKey}
+                                className="flex-1 py-3 bg-red-100 text-red-600 font-bold rounded-lg hover:bg-red-200"
+                            >
+                                Supprimer
+                            </button>
+                        )}
+                        <button 
+                            onClick={handleSaveCustomKey}
+                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-500 shadow-md"
+                        >
+                            Sauvegarder
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {isLoadMenuOpen && renderLoadMenuOverlay()}
         {notification && (
             <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2">

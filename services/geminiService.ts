@@ -2,12 +2,16 @@ import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel } from "../types";
 
 // --- CONFIGURATION ---
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-// Utilisation des variables d'environnement UNIQUEMENT.
+// On retire l'instance globale 'ai' pour la créer dynamiquement selon la clé
+const DEFAULT_API_KEY = process.env.API_KEY;
 const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || "";
 
-export type AIProvider = 'gemini' | 'groq';
+export type AIProvider = 'gemini' | 'groq' | 'custom';
+
+// Helper pour obtenir l'instance avec la bonne clé
+const getAIClient = (customKey?: string) => {
+    return new GoogleGenAI({ apiKey: customKey || DEFAULT_API_KEY });
+};
 
 // --- RETRY LOGIC (Exponential Backoff) ---
 const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
@@ -58,12 +62,15 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
 // --- HELPER: ROBUST GENERATION WITH MODEL FALLBACK ---
 const generateRobustContent = async (
     prompt: string, 
-    config: any
+    config: any,
+    apiKey?: string
 ): Promise<any> => {
+    const aiClient = getAIClient(apiKey);
+
     // 1. Try Primary Model (Flash 2.5)
     try {
         return await withRetry(async () => {
-            return await ai.models.generateContent({
+            return await aiClient.models.generateContent({
                 model: "gemini-2.5-flash",
                 contents: prompt,
                 config: config
@@ -75,7 +82,7 @@ const generateRobustContent = async (
         // 2. Try Fallback Model (Flash Lite)
         try {
             return await withRetry(async () => {
-                return await ai.models.generateContent({
+                return await aiClient.models.generateContent({
                     model: "gemini-2.5-flash-lite-latest",
                     contents: prompt,
                     config: config
@@ -95,18 +102,18 @@ CONTEXTE: Jeu vidéo de stratégie "Grand Strategy".
 OBJECTIF: Simuler un monde VIVANT, AUTONOME et COHÉRENT.
 
 RÈGLES D'OR POUR L'IA (CRITIQUE):
-1. **AUTONOMIE TOTALE DES PNJs**:
+1. **PRIORITÉ ABSOLUE À L'ACTION DU JOUEUR**:
+   - Tu DOIS traiter l'ordre du joueur ("playerAction").
+   - Tu DOIS générer un événement de type "player" qui décrit explicitement le résultat de cet ordre (Succès, Échec, Début de construction, etc.).
+   - Si le joueur construit quelque chose (radar, base, usine), tu DOIS générer un "mapUpdate".
+
+2. **AUTONOMIE DES PNJs**:
    - Tu contrôles les 195 autres pays. Ils ont leurs propres intérêts.
    - ILS N'ATTENDENT PAS LE JOUEUR. Ils signent des traités, déclenchent des guerres et des crises économiques ENTRE EUX.
-   - Si le joueur ne fait rien, le monde doit quand même évoluer (et souvent sombrer dans le chaos).
 
-2. **LE JOUEUR N'EST PAS DIEU**:
+3. **LE JOUEUR N'EST PAS DIEU**:
    - Si le joueur ordonne une action irréaliste (ex: Le Luxembourg annexe la Chine), l'action DOIT ÉCHOUER avec des conséquences désastreuses.
    - Ne sois pas complaisant. Oppose une résistance diplomatique et militaire logique.
-
-3. **GÉNÉRATION D'ÉVÉNEMENTS**:
-   - À CHAQUE TOUR, génère au moins 1 ou 2 événements majeurs ("world" ou "crisis") qui n'impliquent PAS le joueur.
-   - Exemples: "Coup d'État au Nigeria", "Crash boursier à Tokyo", "Tensions frontalières Inde-Pakistan".
 
 4. **TON ET STYLE**:
    - Style journalistique ou dépêche diplomatique. Précis, froid, impactant.
@@ -125,7 +132,7 @@ const RESPONSE_SCHEMA_JSON = {
         items: {
           type: "object",
           properties: {
-            type: { type: "string", enum: ["world", "crisis", "economy", "war", "alliance"] },
+            type: { type: "string", enum: ["player", "world", "crisis", "economy", "war", "alliance"] }, // Added 'player'
             headline: { type: "string" },
             description: { type: "string" },
             relatedCountry: { type: "string" }
@@ -237,7 +244,8 @@ export const simulateTurn = async (
   hasNuclear: boolean = false,
   diplomaticContext: string = "",
   chaosLevel: ChaosLevel = 'normal',
-  provider: AIProvider = 'gemini'
+  provider: AIProvider = 'gemini',
+  customApiKey?: string
 ): Promise<SimulationResponse> => {
   
   const historyContext = recentHistory.slice(-15).map(e => `[${e.date}] ${e.type.toUpperCase()}: ${e.headline}`).join('\n');
@@ -261,10 +269,14 @@ export const simulateTurn = async (
     ${historyContext}
 
     TES MISSIONS POUR CE TOUR:
-    1. **Juger l'action du joueur**: Est-elle possible ? Est-elle intelligente ? Si c'est stupide, fais-la échouer (baisse économie/popularité).
-    2. **Simuler le Reste du Monde**: Génère des événements qui n'impliquent PAS le joueur. Fais bouger les lignes entre les USA, la Russie, la Chine, l'Europe, etc.
+    1. **OBLIGATOIRE: Juger l'action du joueur**:
+       - Tu DOIS inclure un événement de type "player" en première position.
+       - Cet événement doit décrire le résultat de l'ordre "${playerAction}".
+       - Si le joueur veut construire quelque chose (ex: Radar, Base), tu DOIS ajouter un élément dans "mapUpdates" avec type 'build_defense', 'build_airbase', etc. et le label approprié.
+    
+    2. **Simuler le Reste du Monde**: Génère ensuite des événements qui n'impliquent PAS le joueur.
     3. **Définir le Temps**: Choisis 'day' si urgence/guerre, 'month' si tensions, 'year' si calme.
-    4. **Conséquences**: Mets à jour les stats (Tension, Économie, Corruption) de façon punitive si nécessaire.
+    4. **Conséquences**: Mets à jour les stats (Tension, Économie, Corruption).
     
     Sois créatif. Surprends le joueur. Ne sois pas passif.
   `;
@@ -279,7 +291,7 @@ export const simulateTurn = async (
           items: {
           type: Type.OBJECT,
           properties: {
-              type: { type: Type.STRING, enum: ["world", "crisis", "economy", "war", "alliance"] },
+              type: { type: Type.STRING, enum: ["player", "world", "crisis", "economy", "war", "alliance"] }, // Added 'player'
               headline: { type: Type.STRING },
               description: { type: Type.STRING },
               relatedCountry: { type: Type.STRING }
@@ -354,7 +366,7 @@ export const simulateTurn = async (
           responseMimeType: "application/json",
           responseSchema: geminiSchema,
           temperature: chaosLevel === 'chaos' ? 0.95 : 0.8, // Increased temperature for Gemini too
-      });
+      }, customApiKey);
       const text = response.text;
       if (!text) throw new Error("No AI response");
       return JSON.parse(text) as SimulationResponse;
@@ -371,7 +383,8 @@ export const sendDiplomaticMessage = async (
     message: string,
     history: ChatMessage[],
     context: { militaryPower: number; economyHealth: number; globalTension: number; hasNuclear: boolean; },
-    provider: AIProvider = 'gemini'
+    provider: AIProvider = 'gemini',
+    customApiKey?: string
 ): Promise<string | null> => {
     
     const conversationContext = history
@@ -408,7 +421,7 @@ export const sendDiplomaticMessage = async (
     try {
         const response = await generateRobustContent(prompt, {
             temperature: 0.7
-        });
+        }, customApiKey);
         const text = response.text?.trim();
         return text === "NO_RESPONSE" ? null : text || "Reçu.";
     } catch (e) {
@@ -433,7 +446,8 @@ const getFallbackResponse = (): SimulationResponse => ({
 export const getStrategicSuggestions = async (
     playerCountry: string,
     recentHistory: GameEvent[],
-    provider: AIProvider = 'gemini'
+    provider: AIProvider = 'gemini',
+    customApiKey?: string
 ): Promise<string[]> => {
     
     const historyContext = recentHistory.slice(-5).map(e => e.headline).join('\n');
@@ -459,7 +473,7 @@ export const getStrategicSuggestions = async (
              responseMimeType: "application/json", 
              responseSchema: schema,
              temperature: 0.8
-        });
+        }, customApiKey);
         return JSON.parse(response.text || "[]") as string[];
     } catch (e) { return ["Renforcer l'armée", "Négocier une alliance", "Développer l'économie"]; }
 }
