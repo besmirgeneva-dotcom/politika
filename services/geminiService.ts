@@ -1,4 +1,4 @@
-import { GoogleGenAI, Schema, Type } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel } from "../types";
 
 // --- CONFIGURATION ---
@@ -52,9 +52,8 @@ const generateRobustContent = async (
 ): Promise<any> => {
     const aiClient = getAIClient(apiKey);
     
-    // REVENU AU SIMPLE : On utilise le modèle demandé ou 'gemini-1.5-flash' par défaut.
-    // Plus de liste complexe ni de boucle.
-    const modelName = (specificModel && specificModel.trim() !== "") ? specificModel : "gemini-1.5-flash";
+    // MISE À JOUR : Utilisation de gemini-2.5-flash par défaut (1.5 est déprécié)
+    const modelName = (specificModel && specificModel.trim() !== "") ? specificModel : "gemini-2.5-flash";
 
     try {
         return await withRetry(async () => {
@@ -82,63 +81,63 @@ Format: JSON UNIQUEMENT.
 `;
 
 const RESPONSE_SCHEMA_JSON = {
-    type: "object",
+    type: Type.OBJECT,
     properties: {
-      timeIncrement: { type: "string", enum: ["day", "month", "year"] },
+      timeIncrement: { type: Type.STRING, enum: ["day", "month", "year"] },
       events: {
-        type: "array",
+        type: Type.ARRAY,
         items: {
-          type: "object",
+          type: Type.OBJECT,
           properties: {
-            type: { type: "string", enum: ["player", "world", "crisis", "economy", "war", "alliance"] },
-            headline: { type: "string" },
-            description: { type: "string" },
-            relatedCountry: { type: "string" }
+            type: { type: Type.STRING, enum: ["player", "world", "crisis", "economy", "war", "alliance"] },
+            headline: { type: Type.STRING },
+            description: { type: Type.STRING },
+            relatedCountry: { type: Type.STRING }
           },
           required: ["type", "headline", "description"]
         }
       },
-      globalTensionChange: { type: "integer" },
-      economyHealthChange: { type: "integer" },
-      militaryPowerChange: { type: "integer" },
-      popularityChange: { type: "integer" },
-      corruptionChange: { type: "integer" },
-      spaceProgramActive: { type: "boolean" },
+      globalTensionChange: { type: Type.INTEGER },
+      economyHealthChange: { type: Type.INTEGER },
+      militaryPowerChange: { type: Type.INTEGER },
+      popularityChange: { type: Type.INTEGER },
+      corruptionChange: { type: Type.INTEGER },
+      spaceProgramActive: { type: Type.BOOLEAN },
       mapUpdates: {
-        type: "array",
+        type: Type.ARRAY,
         items: {
-            type: "object",
+            type: Type.OBJECT,
             properties: {
-                type: { type: "string", enum: ["annexation", "build_factory", "build_port", "build_airport", "build_airbase", "build_defense", "build_base", "troop_deployment", "remove_entity"] },
-                targetCountry: { type: "string" },
-                newOwner: { type: "string" },
-                lat: { type: "number" },
-                lng: { type: "number" },
-                label: { type: "string" }
+                type: { type: Type.STRING, enum: ["annexation", "build_factory", "build_port", "build_airport", "build_airbase", "build_defense", "build_base", "troop_deployment", "remove_entity"] },
+                targetCountry: { type: Type.STRING },
+                newOwner: { type: Type.STRING },
+                lat: { type: Type.NUMBER },
+                lng: { type: Type.NUMBER },
+                label: { type: Type.STRING }
             },
             required: ["type", "targetCountry"]
         }
       },
       incomingMessages: {
-          type: "array",
+          type: Type.ARRAY,
           items: {
-              type: "object",
+              type: Type.OBJECT,
               properties: {
-                  sender: { type: "string" },
-                  text: { type: "string" },
-                  targets: { type: "array", items: { type: "string" } }
+                  sender: { type: Type.STRING },
+                  text: { type: Type.STRING },
+                  targets: { type: Type.ARRAY, items: { type: Type.STRING } }
               },
               required: ["sender", "text", "targets"]
           }
       },
       allianceUpdate: {
-          type: "object",
+          type: Type.OBJECT,
           properties: {
-              action: { type: "string", enum: ["create", "update", "dissolve"] },
-              name: { type: "string" },
-              type: { type: "string" },
-              members: { type: "array", items: { type: "string" } },
-              leader: { type: "string" }
+              action: { type: Type.STRING, enum: ["create", "update", "dissolve"] },
+              name: { type: Type.STRING },
+              type: { type: Type.STRING },
+              members: { type: Type.ARRAY, items: { type: Type.STRING } },
+              leader: { type: Type.STRING }
           },
           required: ["action"]
       }
@@ -234,6 +233,7 @@ export const simulateTurn = async (
       const prompt = `
         DATE: ${currentDate}
         PAYS JOUEUR: ${playerCountry}
+        ACCÈS MER: ${isLandlocked ? "NON (Enclavé)" : "OUI"}
         POSSESSIONS: ${ownedTerritories.join(', ')}
         FORCES: ${existingEntities.join(' | ')}
         NUCLÉAIRE: ${hasNuclear ? "OUI" : "NON"}
