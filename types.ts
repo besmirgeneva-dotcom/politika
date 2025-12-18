@@ -46,7 +46,7 @@ export interface GameState {
   ownedTerritories: string[];
   mapEntities: MapEntity[];
   infrastructure: Record<string, Record<string, number>>; // NOUVEAU: Stockage mémoire des usines/infra par pays
-  worldSummary: string; // OPTIMISATION: Résumé narratif du monde pour éviter de relire tout l'historique
+  worldSummary: string; // OPTIMISATION: Résumé narratif pour économie de tokens
   strategicSuggestions: string[]; // OPTIMISATION: Suggestions pré-calculées
   turn: number;
   events: GameEvent[];
@@ -68,7 +68,7 @@ export interface GameState {
 
 export interface SimulationResponse {
   timeIncrement: 'day' | 'month' | 'year';
-  worldSummary: string; // L'IA met à jour le résumé du monde
+  worldSummary: string; // L'IA met à jour le résumé
   strategicSuggestions: string[]; // L'IA propose des actions directement
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';

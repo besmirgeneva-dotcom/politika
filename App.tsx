@@ -7,7 +7,7 @@ import ChatInterface from './components/ChatInterface';
 import AllianceWindow from './components/AllianceWindow';
 import DateControls from './components/DateControls';
 import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType } from './types';
-import { simulateTurn, AIProvider } from './services/geminiService';
+import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
 import { loginWithGoogle, loginWithEmail, registerWithEmail, logout, subscribeToAuthChanges, db } from './services/authService';
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, addDoc, query, onSnapshot } from 'firebase/firestore';
@@ -42,6 +42,7 @@ const calculateRank = (power: number): number => Math.max(1, Math.min(195, Math.
 const isCountryLandlocked = (country: string): boolean => LANDLOCKED_COUNTRIES.some(c => country.includes(c));
 const hasNuclearArsenal = (country: string): boolean => NUCLEAR_POWERS.some(c => country.includes(c));
 const hasSpaceProgramInitial = (country: string): boolean => SPACE_POWERS.some(c => country.includes(c));
+const getShortEntityName = (t: MapEntityType) => t === 'military_base' ? 'B' : 'D';
 
 const GameLogo = ({ size = 'large', theme = 'dark' }: { size?: 'small' | 'large', theme?: 'dark' | 'light' }) => {
     const isLight = theme === 'light';
@@ -80,7 +81,7 @@ const App: React.FC = () => {
   
   const [gameState, setGameState] = useState<GameState>({
     gameId: '', currentDate: INITIAL_DATE, playerCountry: null, ownedTerritories: [], mapEntities: [], infrastructure: {},
-    worldSummary: "Situation mondiale stable.", strategicSuggestions: [], // NOUVEAUX CHAMPS
+    worldSummary: "Situation mondiale stable.", strategicSuggestions: [], // NOUVEAU
     turn: 1, events: [], isProcessing: false, globalTension: 20, economyHealth: 50, militaryPower: 50, popularity: 60, corruption: 30,
     hasNuclear: false, hasSpaceProgram: false, militaryRank: 100, chatHistory: [], chaosLevel: 'normal', alliance: null, isGameOver: false, gameOverReason: null
   });
@@ -239,10 +240,9 @@ const App: React.FC = () => {
       setTypingParticipants(targets);
       
       try {
-        // Envoi simple pour la diplomatie (optimisé côté service)
-        const aiResponses = await import('./services/geminiService').then(m => m.sendDiplomaticMessage(
+        const aiResponses = await sendDiplomaticMessage(
             gameState.playerCountry!, targets, message, [...gameState.chatHistory, userMsg], {}, aiProvider
-        ));
+        );
         const newMessages: ChatMessage[] = aiResponses.map(resp => ({
             id: `msg-${Date.now()}-${resp.sender}`, sender: 'ai', senderName: resp.sender, targets: targets, text: resp.text, timestamp: Date.now() + Math.random() * 500, isRead: false
         }));
@@ -281,7 +281,7 @@ const App: React.FC = () => {
     // Carte
     gameState.mapEntities.forEach(ent => {
         if (!summaryMap[ent.country]) summaryMap[ent.country] = {};
-        const code = ent.type === 'military_base' ? 'B' : 'D';
+        const code = getShortEntityName(ent.type);
         summaryMap[ent.country][code] = (summaryMap[ent.country][code] || 0) + 1;
     });
     // Infra Mémoire
@@ -289,13 +289,11 @@ const App: React.FC = () => {
         Object.entries(gameState.infrastructure).forEach(([country, infraTypes]) => {
             if (!summaryMap[country]) summaryMap[country] = {};
             Object.entries(infraTypes).forEach(([type, count]) => {
-                // On garde les 3 premières lettres pour l'infra (ex: USI, POR, ECO) pour économiser des tokens
                 const code = type.substring(0, 3).toUpperCase();
                 summaryMap[country][code] = (summaryMap[country][code] || 0) + count;
             });
         });
     }
-    // String compacte: "FRA:B2,D1,USI5"
     const entitiesSummary = Object.entries(summaryMap).map(([c, counts]) => {
         return `${c.substring(0,3).toUpperCase()}:${Object.entries(counts).map(([k,v]) => `${k}${v}`).join(',')}`;
     }).join('|');
@@ -303,8 +301,7 @@ const App: React.FC = () => {
     // On passe le worldSummary existant pour que l'IA le mette à jour
     const result = await simulateTurn(
         gameState.playerCountry, formattedDate, finalOrderString, gameState.events,
-        entitiesSummary,
-        isCountryLandlocked(gameState.playerCountry), gameState.hasNuclear, 
+        gameState.ownedTerritories, entitiesSummary, isCountryLandlocked(gameState.playerCountry), gameState.hasNuclear, 
         gameState.chatHistory.slice(-5).map(m => `${m.sender}: ${m.text}`).join('|'), // Chat très court
         gameState.chaosLevel, aiProvider, gameState.militaryPower, gameState.alliance,
         gameState.worldSummary // Envoi du contexte
@@ -417,20 +414,32 @@ const App: React.FC = () => {
   );
 
   if (appMode === 'portal_landing') return (
-      <div className="min-h-screen bg-white text-slate-900 flex flex-col items-center justify-center p-6 text-center">
-          <h1 className="text-5xl font-black mb-6">POLITIKA</h1>
-          <button onClick={user ? () => setAppMode('portal_dashboard') : () => setShowLoginModal(true)} className="bg-black text-white px-8 py-4 rounded-xl font-bold text-xl hover:scale-105 transition-transform">JOUER</button>
-          {showLoginModal && <div className="absolute inset-0 bg-black/80 flex items-center justify-center"><div className="bg-white p-8 rounded-xl max-w-sm w-full"><h3 className="text-xl font-bold mb-4">Connexion</h3><button onClick={handleGoogleLogin} className="w-full bg-blue-600 text-white py-3 rounded font-bold mb-2">Google</button><button onClick={() => setShowLoginModal(false)} className="text-sm underline">Fermer</button></div></div>}
+      <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-black selection:text-white overflow-x-hidden">
+          <nav className="relative flex items-center justify-center px-6 py-6 max-w-7xl mx-auto">
+              <div className="flex items-center gap-2"><div className="w-8 h-8 bg-black rounded-full border-4 border-slate-200"></div><h1 className="text-2xl font-black tracking-tight uppercase">Politika</h1></div>
+              {user && <button onClick={handleLogout} className="absolute right-6 text-xs font-bold text-red-500 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">Déconnexion</button>}
+          </nav>
+          <main className="max-w-7xl mx-auto px-6 mt-10 md:mt-20 flex flex-col md:flex-row items-center gap-12">
+              <div className="flex-1 space-y-6">
+                  <h2 className="text-5xl md:text-7xl font-black leading-tight tracking-tighter">RÉÉCRIVEZ<br/>L'HISTOIRE.</h2>
+                  <div className="flex gap-4 pt-4"><button onClick={user ? () => setAppMode('portal_dashboard') : () => setShowLoginModal(true)} className="px-8 py-4 bg-black text-white rounded-xl font-bold text-lg shadow-xl hover:scale-105 transition-transform">{user ? "ACCÉDER AU QG" : "JOUER"} ➔</button></div>
+              </div>
+              <div className="flex-1 relative w-full aspect-video bg-slate-50 rounded-3xl border-2 border-slate-100 overflow-hidden shadow-2xl flex items-center justify-center"><GameLogo size="large" theme="light"/></div>
+          </main>
+          {showLoginModal && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><div className="bg-white p-8 rounded-xl"><h3 className="text-xl font-bold mb-4">Connexion</h3><button onClick={handleGoogleLogin} className="w-full bg-blue-600 text-white py-3 rounded font-bold mb-2">Google</button><button onClick={() => setShowLoginModal(false)} className="text-sm underline">Fermer</button></div></div>}
       </div>
   );
 
   if (appMode === 'portal_dashboard') return (
-      <div className="min-h-screen bg-slate-50 p-6">
-          <header className="flex justify-between items-center mb-10"><h1 className="text-2xl font-bold">QG</h1><div className="flex gap-2">{user && <span className="text-sm font-bold bg-white px-3 py-1 rounded border">{user.email}</span>}<button onClick={handleLogout}>✕</button></div></header>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div onClick={launchGeoSim} className="bg-black text-white p-8 rounded-2xl cursor-pointer hover:scale-[1.02] transition-transform"><h2 className="text-3xl font-bold mb-2">GeoSim</h2><p className="opacity-70">Simulation 2000</p></div>
-              <div className="bg-white p-6 rounded-2xl border border-slate-200"><h3 className="font-bold mb-4">Sauvegardes</h3>{availableSaves.length === 0 ? <p className="text-slate-400 text-sm">Vide.</p> : availableSaves.map(s => <div key={s.id} onClick={() => loadGameById(s.id)} className="p-2 border-b cursor-pointer hover:bg-slate-50 flex justify-between"><span>{s.country}</span><span className="text-slate-400 text-xs">T.{s.turn}</span></div>)}</div>
-          </div>
+      <div className="min-h-screen bg-slate-50 p-6 font-sans">
+          <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center sticky top-0 z-20">
+              <h1 className="text-xl font-black uppercase">Politika <span className="text-slate-400 font-normal">Dashboard</span></h1>
+              {user && <button onClick={handleLogout} className="bg-slate-100 text-slate-600 p-2 rounded-lg">✕</button>}
+          </header>
+          <main className="max-w-6xl mx-auto p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div onClick={launchGeoSim} className="bg-black text-white p-8 rounded-2xl cursor-pointer hover:scale-[1.02] transition-transform"><h2 className="text-3xl font-bold mb-2">GeoSim</h2><p className="opacity-70">Simulation 2000</p><button className="mt-4 bg-white text-black px-4 py-2 rounded font-bold">LANCER</button></div>
+              <div className="bg-white p-6 rounded-2xl border border-slate-200"><h3 className="font-bold mb-4">Sauvegardes</h3>{availableSaves.map(s => <div key={s.id} onClick={() => loadGameById(s.id)} className="p-2 border-b cursor-pointer hover:bg-slate-50 flex justify-between"><span>{s.country}</span><span className="text-slate-400 text-xs">T.{s.turn}</span></div>)}</div>
+          </main>
       </div>
   );
 
@@ -440,29 +449,26 @@ const App: React.FC = () => {
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-stone-900 font-sans">
             <WorldMap playerCountry={gameState.playerCountry} ownedTerritories={gameState.ownedTerritories} mapEntities={gameState.mapEntities} onRegionClick={handleRegionSelect} focusCountry={focusCountry}/>
+            <EventLog isOpen={activeWindow === 'events'} onClose={() => setActiveWindow('none')} eventQueue={eventQueue} onReadEvent={handleReadEvent} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={handleAddOrder} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={handleGetSuggestions} turn={gameState.turn}/>
+            <HistoryLog isOpen={activeWindow === 'history'} onClose={() => setActiveWindow('none')} history={fullHistory}/>
+            <ChatInterface isOpen={activeWindow === 'chat'} onClose={() => toggleWindow('chat')} playerCountry={gameState.playerCountry || ""} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={handleMarkChatRead}/>
+            {gameState.alliance && <AllianceWindow isOpen={activeWindow === 'alliance'} onClose={() => setActiveWindow('none')} alliance={gameState.alliance} playerCountry={gameState.playerCountry || ""}/>}
             
             {showStartModal && !gameState.playerCountry && !pendingCountry && <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none"><div className="bg-white p-6 rounded-xl shadow-xl pointer-events-auto">Sélectionnez un pays sur la carte.</div></div>}
             {pendingCountry && <div className="absolute inset-0 z-50 flex items-center justify-center"><div className="bg-white p-6 rounded-xl shadow-xl text-center"><h3 className="text-xl font-bold mb-4">{pendingCountry}</h3><div className="flex gap-2"><button onClick={confirmCountrySelection} className="bg-blue-600 text-white px-4 py-2 rounded font-bold">Confirmer</button><button onClick={() => setPendingCountry(null)} className="bg-stone-200 px-4 py-2 rounded font-bold">Annuler</button></div></div></div>}
 
             {gameState.playerCountry && !gameState.isGameOver && (
                 <>
-                    <EventLog isOpen={activeWindow === 'events'} onClose={() => setActiveWindow('none')} eventQueue={eventQueue} onReadEvent={handleReadEvent} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={handleAddOrder} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={handleGetSuggestions} turn={gameState.turn}/>
-                    <HistoryLog isOpen={activeWindow === 'history'} onClose={() => setActiveWindow('none')} history={fullHistory}/>
-                    <ChatInterface isOpen={activeWindow === 'chat'} onClose={() => toggleWindow('chat')} playerCountry={gameState.playerCountry} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={handleMarkChatRead}/>
-                    {gameState.alliance && <AllianceWindow isOpen={activeWindow === 'alliance'} onClose={() => setActiveWindow('none')} alliance={gameState.alliance} playerCountry={gameState.playerCountry}/>}
-                    
                     <div className="absolute bottom-6 left-6 z-20 flex gap-4">
-                        <button onClick={() => toggleWindow('events')} className={`w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-2xl border-2 ${activeWindow === 'events' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>📝</button>
-                        <div className="relative"><button onClick={() => toggleWindow('chat')} className={`w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-2xl border-2 ${activeWindow === 'chat' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>💬</button>{hasUnreadChat && <div className="absolute top-0 right-0 w-4 h-4 bg-red-500 border-2 border-white rounded-full"></div>}</div>
-                        <button onClick={() => toggleWindow('history')} className={`w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-2xl border-2 ${activeWindow === 'history' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>📚</button>
-                        {gameState.alliance && <button onClick={() => toggleWindow('alliance')} className={`w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-2xl border-2 ${activeWindow === 'alliance' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>🤝</button>}
+                        <button onClick={() => toggleWindow('events')} className={`w-14 h-14 rounded-full shadow-xl border-2 flex items-center justify-center text-2xl ${activeWindow === 'events' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>📝</button>
+                        <div className="relative"><button onClick={() => toggleWindow('chat')} className={`w-14 h-14 rounded-full shadow-xl border-2 flex items-center justify-center text-2xl ${activeWindow === 'chat' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>💬</button>{hasUnreadChat && <div className="absolute top-0 right-0 w-4 h-4 bg-red-500 border-2 border-white rounded-full"></div>}</div>
+                        <button onClick={() => toggleWindow('history')} className={`w-14 h-14 rounded-full shadow-xl border-2 flex items-center justify-center text-2xl ${activeWindow === 'history' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>📚</button>
+                        {gameState.alliance && <button onClick={() => toggleWindow('alliance')} className={`w-14 h-14 rounded-full shadow-xl border-2 flex items-center justify-center text-2xl ${activeWindow === 'alliance' ? 'bg-blue-50 border-blue-400' : 'bg-white border-stone-200'}`}>🤝</button>}
                     </div>
-
                     <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
                         {user && <div className="w-8 h-8 rounded-full bg-stone-800 text-white flex items-center justify-center font-bold text-xs">{user.email[0].toUpperCase()}</div>}
                         <button onClick={() => setIsSettingsOpen(true)} className="bg-stone-900/90 text-white px-4 py-2 rounded-lg border border-stone-700 shadow-xl font-bold text-sm flex items-center gap-2"><img src={getFlagUrl(gameState.playerCountry)} className="w-5 h-3 object-cover rounded"/> {gameState.playerCountry}</button>
                     </div>
-
                     <DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing}/>
                 </>
             )}
@@ -471,6 +477,13 @@ const App: React.FC = () => {
                 <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
                     <div className="bg-white p-6 rounded-xl max-w-xs w-full">
                         <h3 className="font-bold text-lg mb-4">Paramètres</h3>
+                        <div className="mb-4 space-y-2">
+                             <label className="block text-xs font-bold uppercase text-stone-500">Moteur IA</label>
+                             <div className="flex bg-stone-200 rounded p-1">
+                                <button onClick={() => setAiProvider('gemini')} className={`flex-1 py-1 text-xs font-bold rounded ${aiProvider === 'gemini' ? 'bg-white shadow' : ''}`}>Gemini</button>
+                                <button onClick={() => setAiProvider('groq')} className={`flex-1 py-1 text-xs font-bold rounded ${aiProvider === 'groq' ? 'bg-white shadow' : ''}`}>Groq</button>
+                             </div>
+                        </div>
                         <div className="space-y-2">
                             <button onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} className="w-full py-3 bg-emerald-600 text-white rounded font-bold">Sauvegarder</button>
                             <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 text-white rounded font-bold">Charger</button>

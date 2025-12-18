@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { GameEvent, SimulationResponse, ChatMessage, ChaosLevel, Alliance } from "../types";
 
 // --- CONFIGURATION ---
@@ -33,22 +33,20 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
     }
 };
 
-// --- OPTIMISATION : INSTRUCTION SYSTÈME COMPACTE ---
 const SYSTEM_INSTRUCTION = `Role: Moteur GeoSim. 
 Style: Dépêches AFP, Français. 
 Règles: 
-1. Infra Carte: 'mapUpdates' (Bases, Défense).
-2. Infra Mémoire: 'infrastructureUpdates' (Usines, Ports Civils).
-3. Diplomatie: Pays/ONU/UE/OTAN seulement.
-4. Contexte: Utilise 'worldSummary' pour la cohérence. Mets-le à jour.
-5. Suggestions: Inclus 3 actions courtes pour le joueur.`;
+1. Carte ('mapUpdates'): Uniquement Militaire Majeur (Base, Défense).
+2. Mémoire ('infrastructureUpdates'): Tout le civil/indus (Usine, Port, École).
+3. Suggestions: Inclus 3 conseils stratégiques courts.
+4. Contexte: Utilise 'worldSummary' pour la continuité. Mets-le à jour.`;
 
-// --- OPTIMISATION : SCHÉMA JSON SANS DESCRIPTIONS (Gain Tokens) ---
+// OPTIMISATION: Schéma JSON sans descriptions pour économiser des tokens de sortie
 const RESPONSE_SCHEMA_JSON = {
     type: "object",
     properties: {
       timeIncrement: { type: "string", enum: ["day", "month", "year"] },
-      worldSummary: { type: "string" }, // Résumé narratif court pour le prochain tour
+      worldSummary: { type: "string" }, // Le nouveau résumé
       strategicSuggestions: { type: "array", items: { type: "string" } }, // Fusion requête suggestions
       events: {
         type: "array",
@@ -116,12 +114,30 @@ const RESPONSE_SCHEMA_JSON = {
     required: ["timeIncrement", "worldSummary", "strategicSuggestions", "events", "globalTensionChange", "economyHealthChange", "militaryPowerChange", "popularityChange", "corruptionChange"],
 };
 
+const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
+    if (!GROQ_API_KEY) throw new Error("Clé Groq manquante.");
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+            messages: [{ role: "system", content: system + (jsonMode ? " JSON ONLY." : "") }, { role: "user", content: prompt }],
+            model: "llama-3.3-70b-versatile",
+            temperature: 0.8,
+            max_tokens: 2048,
+            response_format: jsonMode ? { type: "json_object" } : undefined
+        })
+    });
+    if (!response.ok) throw new Error(`Groq API Error ${response.status}`);
+    return (await response.json()).choices[0]?.message?.content || "";
+};
+
 export const simulateTurn = async (
   playerCountry: string,
   currentDate: string,
   playerAction: string,
   recentHistory: GameEvent[],
-  entitiesSummary: string, // Format compressé "FRA:B1,I2"
+  ownedTerritories: string[],
+  entitiesSummary: string,
   isLandlocked: boolean,
   hasNuclear: boolean,
   recentChat: string,
@@ -129,24 +145,29 @@ export const simulateTurn = async (
   provider: AIProvider,
   playerPower: number,
   alliance: Alliance | null,
-  worldSummary: string // Le contexte narratif actuel
+  worldSummary: string // Ajout du résumé narratif
 ): Promise<SimulationResponse> => {
   
-  // OPTIMISATION: On ne garde que les 3 derniers événements en détail
-  // Le reste est supposé être contenu dans worldSummary
+  // OPTIMISATION: On ne garde que les 3 derniers événements en détail + le résumé
   const shortHistory = recentHistory.slice(-3).map(e => `[${e.date}] ${e.type}: ${e.headline}`).join('\n');
-  
   const allianceInfo = alliance ? `Alliance: ${alliance.name} (${alliance.leader})` : "Non-aligné";
 
   const prompt = `PAYS: ${playerCountry} | DATE: ${currentDate} | CHAOS: ${chaosLevel} | POWER: ${playerPower}
 ${allianceInfo} | Landlocked: ${isLandlocked} | Nuke: ${hasNuclear}
-CONTEXTE MONDIAL: ${worldSummary || "Début de partie."}
+CONTEXTE MONDIAL (RESUME): ${worldSummary || "Début de partie."}
 ACTION JOUEUR: "${playerAction || "Rien."}"
 DERNIERS FAITS:
 ${shortHistory}
 INFRA (Codes: B=Base, D=Défense, I=Infra): ${entitiesSummary}
 CHAT RECENT: ${recentChat}`;
 
+  if (provider === 'groq' && GROQ_API_KEY) {
+      try {
+          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, RESPONSE_SCHEMA_JSON);
+          return JSON.parse(jsonStr) as SimulationResponse;
+      } catch (error) { console.warn("Groq failed, fallback to Gemini."); }
+  } 
+  
   try {
       const response = await generateRobustContent(prompt, {
           systemInstruction: SYSTEM_INSTRUCTION,
@@ -157,8 +178,8 @@ CHAT RECENT: ${recentChat}`;
       return JSON.parse(response.text) as SimulationResponse;
   } catch (error) { 
       return {
-          timeIncrement: 'month', worldSummary: "Stabilité.", strategicSuggestions: ["Observer", "Agir"],
-          events: [{ type: "world", headline: "Calme", description: "Le temps passe." }],
+          timeIncrement: 'day', worldSummary: "Erreur flux.", strategicSuggestions: ["Attendre"],
+          events: [{ type: "world", headline: "Perturbation", description: "Communication perdue." }],
           globalTensionChange: 0, economyHealthChange: 0, militaryPowerChange: 0, popularityChange: 0, corruptionChange: 0
       };
   }
@@ -172,9 +193,9 @@ export const sendDiplomaticMessage = async (
     context: any,
     provider: AIProvider = 'gemini'
 ): Promise<{ sender: string, text: string }[]> => {
-    // Optimisation context chat
+    // Compression contexte chat
     const conv = history.slice(-5).map(m => `${m.senderName}: ${m.text}`).join('\n');
-    const prompt = `Pays: ${targets.join(',')}. Message de ${playerCountry}: "${message}".
+    const prompt = `Pays: ${targets.join(',')}. Msg de ${playerCountry}: "${message}".
 Conv:\n${conv}
 Réponds JSON: [{ "sender": "Pays", "text": "..." }]`;
     
@@ -187,6 +208,5 @@ Réponds JSON: [{ "sender": "Pays", "text": "..." }]`;
 }
 
 export const getStrategicSuggestions = async (playerCountry: string, recentHistory: GameEvent[]): Promise<string[]> => {
-    // Fallback si jamais appelé manuellement, mais devrait être géré par simulateTurn
-    return ["Renforcer l'économie", "Chercher des alliés", "Surveiller les frontières"];
+    return ["Analyser les marchés", "Renforcer les frontières", "Ouvrir des négociations"];
 }
