@@ -55,11 +55,8 @@ const createDotIcon = (color: string, labels: string[], type: string, showLabel:
 
 const getEntityLabel = (type: MapEntityType) => {
     switch(type) {
-        case 'military_factory': return '🏭 Usine Armement';
-        case 'military_port': return '⚓ Port Militaire';
         case 'military_base': return '🏰 Base Militaire';
-        case 'airbase': return '🛫 Base Aérienne';
-        case 'defense_system': return '🛡️ Défense Anti-Air';
+        case 'defense_system': return '🛡️ Défense';
         default: return type;
     }
 }
@@ -67,11 +64,8 @@ const getEntityLabel = (type: MapEntityType) => {
 // Color mapping for entity types
 const getEntityColor = (type: MapEntityType) => {
     switch(type) {
-        case 'military_factory': return '#f59e0b'; // Amber
-        case 'military_port': return '#0ea5e9'; // Sky Blue
-        case 'military_base': return '#6366f1'; // Indigo
-        case 'airbase': return '#dc2626'; // Red
-        case 'defense_system': return '#10b981'; // Emerald
+        case 'military_base': return '#6366f1'; // Indigo for Bases (Main)
+        case 'defense_system': return '#10b981'; // Emerald for Defense
         default: return '#64748b';
     }
 };
@@ -421,8 +415,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     return Object.values(groups);
   }, [mapEntities]);
 
-  const showMarkers = zoom >= 8;
-  const showMarkerLabels = zoom >= 9;
+  const showMarkers = zoom >= 6; // Affichage un peu plus tôt vu qu'il y a moins de marqueurs
+  const showMarkerLabels = zoom >= 8;
 
   return (
     <div className="w-full h-full absolute inset-0 z-0 bg-stone-900">
@@ -442,7 +436,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
 
         {showMarkers && groupedEntities.map((group, idx) => {
              const first = group[0];
-             const isGroup = group.length > 1;
+             // const isGroup = group.length > 1; // Unused
              const labels = group.map(e => e.label || getEntityLabel(e.type));
              const color = getEntityColor(first.type);
              

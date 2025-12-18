@@ -8,8 +8,8 @@ export interface GameEvent {
   relatedCountry?: string; // Pour centrer la caméra
 }
 
-// Types restreints aux demandes militaires spécifiques
-export type MapEntityType = 'military_factory' | 'military_port' | 'military_base' | 'airbase' | 'defense_system';
+// Types restreints pour nettoyer la map et simplifier le jeu
+export type MapEntityType = 'military_base' | 'defense_system';
 
 export interface MapEntity {
   id: string;
@@ -45,26 +45,28 @@ export interface GameState {
   playerCountry: string | null;
   ownedTerritories: string[];
   mapEntities: MapEntity[];
+  infrastructure: Record<string, Record<string, number>>; // NOUVEAU: Stockage mémoire des usines/infra par pays
   turn: number;
   events: GameEvent[];
   isProcessing: boolean;
   globalTension: number;
   economyHealth: number;
   militaryPower: number;
-  popularity: number; // Nouvelle stat: Popularité (0-100)
-  corruption: number; // Nouvelle stat: Corruption (0-100, 0 = intègre, 100 = état failli)
+  popularity: number;
+  corruption: number;
   hasNuclear: boolean;
-  hasSpaceProgram: boolean; // Nouvelle stat: Capacité spatiale
-  militaryRank: number; // Nouvelle stat: Classement mondial (1-195)
+  hasSpaceProgram: boolean;
+  militaryRank: number;
   chatHistory: ChatMessage[];
   chaosLevel: ChaosLevel;
   alliance: Alliance | null;
-  isGameOver: boolean; // État de défaite
+  isGameOver: boolean;
   gameOverReason: string | null;
+  currentSuggestions: string[]; // OPTIMISATION: Suggestions pré-calculées
 }
 
 export interface SimulationResponse {
-  timeIncrement: 'day' | 'month' | 'year'; // L'IA décide du saut temporel
+  timeIncrement: 'day' | 'month' | 'year';
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
     headline: string;
@@ -74,17 +76,25 @@ export interface SimulationResponse {
   globalTensionChange: number;
   economyHealthChange: number;
   militaryPowerChange: number;
-  popularityChange: number; // Changement de popularité
-  corruptionChange: number; // Changement de corruption
-  spaceProgramActive?: boolean; // Mise à jour explicite du programme spatial
+  popularityChange: number;
+  corruptionChange: number;
+  spaceProgramActive?: boolean;
+  strategicSuggestions?: string[]; // OPTIMISATION: Retourné par l'IA à chaque tour
+  // Mises à jour visuelles (Carte)
   mapUpdates?: {
-    type: 'annexation' | 'build_factory' | 'build_port' | 'build_airport' | 'build_airbase' | 'build_defense' | 'remove_entity';
+    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
     targetCountry: string;
-    newOwner?: string; // Le pays qui prend le contrôle (ou "INDEPENDENT" pour libération)
+    newOwner?: string;
     lat?: number;
     lng?: number;
     label?: string;
-    entityId?: string; // Pour la suppression
+    entityId?: string;
+  }[];
+  // Mises à jour invisibles (Mémoire / Stats)
+  infrastructureUpdates?: {
+      country: string;
+      type: string; // ex: "usine_munitions", "port_civil"
+      change: number; // +1 ou -1
   }[];
   incomingMessages?: {
       sender: string;
