@@ -6,6 +6,7 @@ import HistoryLog from './components/HistoryLog';
 import ChatInterface from './components/ChatInterface';
 import AllianceWindow from './components/AllianceWindow';
 import DateControls from './components/DateControls';
+import GameHUD from './components/GameHUD'; // IMPORT DU NOUVEAU COMPOSANT
 import { GameState, GameEvent, MapEntity, ChatMessage, ChaosLevel, MapEntityType } from './types';
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
 import { NUCLEAR_POWERS, LANDLOCKED_COUNTRIES, SPACE_POWERS, ALL_COUNTRIES_LIST, NATO_MEMBERS_2000, getFlagUrl, normalizeCountryName } from './constants';
@@ -449,6 +450,7 @@ const App: React.FC = () => {
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-stone-900 font-sans">
             <WorldMap playerCountry={gameState.playerCountry} ownedTerritories={gameState.ownedTerritories} mapEntities={gameState.mapEntities} onRegionClick={handleRegionSelect} focusCountry={focusCountry}/>
+            <GameHUD gameState={gameState} /> 
             <EventLog isOpen={activeWindow === 'events'} onClose={() => setActiveWindow('none')} eventQueue={eventQueue} onReadEvent={handleReadEvent} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={handleAddOrder} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={handleGetSuggestions} turn={gameState.turn}/>
             <HistoryLog isOpen={activeWindow === 'history'} onClose={() => setActiveWindow('none')} history={fullHistory}/>
             <ChatInterface isOpen={activeWindow === 'chat'} onClose={() => toggleWindow('chat')} playerCountry={gameState.playerCountry || ""} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={handleMarkChatRead}/>

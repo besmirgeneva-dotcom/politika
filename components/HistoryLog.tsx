@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect } from 'react';
 import { GameEvent } from '../types';
 
@@ -9,6 +10,7 @@ interface HistoryLogProps {
 
 const HistoryLog: React.FC<HistoryLogProps> = ({ isOpen, onClose, history }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -17,12 +19,27 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ isOpen, onClose, history }) => 
     }
   }, [history, isOpen]);
 
+  // CLICK OUTSIDE TO CLOSE
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+              onClose();
+          }
+      };
+      if (isOpen) {
+          document.addEventListener('mousedown', handleClickOutside);
+      }
+      return () => {
+          document.removeEventListener('mousedown', handleClickOutside);
+      };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[85%] h-[50%] md:w-[380px] md:h-[400px] z-50 flex flex-col animate-scale-in">
       
-      <div className="flex-1 bg-stone-100/95 backdrop-blur-md rounded-xl shadow-2xl border border-stone-300 flex flex-col overflow-hidden">
+      <div ref={containerRef} className="flex-1 bg-stone-100/95 backdrop-blur-md rounded-xl shadow-2xl border border-stone-300 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="bg-stone-800 p-3 flex justify-between items-center text-white">
           <h2 className="font-serif font-bold text-sm flex items-center gap-2">
