@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChatMessage } from '../types';
 import { getFlagUrl, normalizeCountryName } from '../constants';
@@ -177,12 +178,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const currentTypingList = typingParticipants.filter(p => activeParticipants.includes(p));
 
   return (
-    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[85%] h-[50%] md:w-[380px] md:h-[400px] z-50 flex flex-col animate-scale-in">
+    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[95%] h-[60%] md:w-[650px] md:h-[500px] z-50 flex flex-col animate-scale-in">
       <div className="flex-1 bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row border border-stone-300">
         
         {/* --- LEFT SIDEBAR (Conversations List) --- */}
         <div className={`
-            flex flex-col bg-stone-100 border-r border-stone-200 md:w-1/3
+            flex flex-col bg-stone-100 border-r border-stone-200 md:w-[240px] shrink-0
             ${viewMode === 'list' ? 'flex w-full h-full' : 'hidden md:flex'}
         `}>
             {/* Header */}
