@@ -39,55 +39,13 @@ export interface Alliance {
   leader: string;
 }
 
-export interface SimulationResponse {
-    timeIncrement: 'day' | 'month' | 'year';
-    events: {
-        type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
-        headline: string;
-        description: string;
-        relatedCountry?: string;
-    }[];
-    globalTensionChange: number;
-    economyHealthChange: number;
-    militaryPowerChange: number;
-    popularityChange?: number;
-    corruptionChange?: number;
-    spaceProgramActive?: boolean;
-    mapUpdates?: {
-        type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
-        targetCountry: string;
-        newOwner?: string;
-        lat?: number;
-        lng?: number;
-        label?: string;
-        entityId?: string;
-    }[];
-    infrastructureUpdates?: {
-        country: string;
-        type: string;
-        change: number;
-    }[];
-    incomingMessages?: {
-        sender: string;
-        text: string;
-        targets: string[];
-    }[];
-    allianceUpdate?: {
-        action: 'create' | 'update' | 'dissolve';
-        name: string;
-        type: string;
-        members: string[];
-        leader: string;
-    };
-}
-
 export interface GameState {
   gameId: string;
   currentDate: Date;
   playerCountry: string | null;
   ownedTerritories: string[];
   mapEntities: MapEntity[];
-  infrastructure: Record<string, Record<string, number>>; // Stockage mémoire des usines/infra par pays
+  infrastructure: Record<string, Record<string, number>>; // NOUVEAU: Stockage mémoire des usines/infra par pays
   turn: number;
   events: GameEvent[];
   isProcessing: boolean;
@@ -97,8 +55,55 @@ export interface GameState {
   popularity: number;
   corruption: number;
   hasNuclear: boolean;
-  chaosLevel: ChaosLevel;
+  hasSpaceProgram: boolean;
+  militaryRank: number;
   chatHistory: ChatMessage[];
+  chaosLevel: ChaosLevel;
   alliance: Alliance | null;
   isGameOver: boolean;
+  gameOverReason: string | null;
+}
+
+export interface SimulationResponse {
+  timeIncrement: 'day' | 'month' | 'year';
+  events: {
+    type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
+    headline: string;
+    description: string;
+    relatedCountry?: string;
+  }[];
+  globalTensionChange: number;
+  economyHealthChange: number;
+  militaryPowerChange: number;
+  popularityChange: number;
+  corruptionChange: number;
+  spaceProgramActive?: boolean;
+  // Mises à jour visuelles (Carte)
+  mapUpdates?: {
+    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
+    targetCountry: string;
+    newOwner?: string;
+    lat?: number;
+    lng?: number;
+    label?: string;
+    entityId?: string;
+  }[];
+  // Mises à jour invisibles (Mémoire / Stats)
+  infrastructureUpdates?: {
+      country: string;
+      type: string; // ex: "usine_munitions", "port_civil"
+      change: number; // +1 ou -1
+  }[];
+  incomingMessages?: {
+      sender: string;
+      text: string;
+      targets: string[];
+  }[];
+  allianceUpdate?: {
+    action: 'create' | 'update' | 'dissolve';
+    name?: string;
+    type?: string;
+    members?: string[];
+    leader?: string;
+  };
 }
