@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GameEvent } from '../types';
 
 interface EventLogProps {
@@ -32,28 +31,13 @@ const EventLog: React.FC<EventLogProps> = ({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [hasFetchedThisTurn, setHasFetchedThisTurn] = useState(false);
-  const modalRef = useRef<HTMLDivElement>(null);
 
   // RESET LOGIC: Critical for token saving.
+  // We ensure suggestions are cleared every turn and ONLY fetched on user click.
   useEffect(() => {
     setSuggestions([]);
     setHasFetchedThisTurn(false);
   }, [turn]);
-
-  // CLICK OUTSIDE TO CLOSE
-  useEffect(() => {
-      const handleClickOutside = (event: MouseEvent) => {
-          if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-              onClose();
-          }
-      };
-      if (isOpen) {
-          document.addEventListener('mousedown', handleClickOutside);
-      }
-      return () => {
-          document.removeEventListener('mousedown', handleClickOutside);
-      };
-  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -100,7 +84,7 @@ const EventLog: React.FC<EventLogProps> = ({
   return (
     <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[85%] h-[50%] md:w-[380px] md:h-[400px] z-50 flex flex-col animate-scale-in">
       
-      <div ref={modalRef} className="flex-1 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col">
+      <div className="flex-1 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col">
         
         {/* --- HEADER --- */}
         <div className={`p-3 border-b flex justify-between items-center ${

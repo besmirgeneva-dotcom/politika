@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChatMessage } from '../types';
 import { getFlagUrl, normalizeCountryName } from '../constants';
@@ -38,7 +37,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [inputText, setInputText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // Helper to normalize participant list for grouping
   const getParticipants = (msg: ChatMessage): string[] => {
@@ -124,21 +122,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }
   }, [isOpen]);
 
-  // CLICK OUTSIDE TO CLOSE
-  useEffect(() => {
-      const handleClickOutside = (event: MouseEvent) => {
-          if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-              onClose();
-          }
-      };
-      if (isOpen) {
-          document.addEventListener('mousedown', handleClickOutside);
-      }
-      return () => {
-          document.removeEventListener('mousedown', handleClickOutside);
-      };
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
 
   // --- HANDLERS ---
@@ -194,18 +177,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const currentTypingList = typingParticipants.filter(p => activeParticipants.includes(p));
 
   return (
-    // WIDTH INCREASED: md:w-[650px] instead of 380px
-    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[90%] h-[60%] md:w-[650px] md:h-[450px] z-50 flex flex-col animate-scale-in">
-      <div ref={containerRef} className="flex-1 bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row border border-stone-300">
+    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[85%] h-[50%] md:w-[380px] md:h-[400px] z-50 flex flex-col animate-scale-in">
+      <div className="flex-1 bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row border border-stone-300">
         
         {/* --- LEFT SIDEBAR (Conversations List) --- */}
-        {/* WIDTH CHANGED: Fixed width md:w-[220px] for better visibility of names */}
         <div className={`
-            flex flex-col bg-stone-100 border-r border-stone-200 md:w-[220px] shrink-0
+            flex flex-col bg-stone-100 border-r border-stone-200 md:w-1/3
             ${viewMode === 'list' ? 'flex w-full h-full' : 'hidden md:flex'}
         `}>
             {/* Header */}
-            <div className="p-2 bg-white border-b border-stone-200 flex justify-between items-center shadow-sm h-[45px]">
+            <div className="p-2 bg-white border-b border-stone-200 flex justify-between items-center shadow-sm">
                 <h2 className="font-bold text-stone-700 text-xs">Discussions</h2>
                 <button 
                     onClick={handleOpenNewChat}
@@ -247,11 +228,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                 onClick={() => selectConversation(conv.targets)}
                                 className={`w-full p-2 text-left border-b border-stone-200 hover:bg-white transition-colors flex gap-2 items-center ${isActive ? 'bg-white border-l-4 border-l-blue-600' : 'bg-transparent'}`}
                             >
-                                <div className="relative shrink-0">
+                                <div className="relative">
                                     {flag ? (
-                                        <img src={flag} alt="flag" className="w-8 h-5 rounded shadow-sm object-cover" />
+                                        <img src={flag} alt="flag" className="w-6 h-4 rounded shadow-sm object-cover" />
                                     ) : (
-                                        <div className="w-8 h-5 bg-stone-300 rounded flex items-center justify-center text-[10px]">?</div>
+                                        <div className="w-6 h-4 bg-stone-300 rounded flex items-center justify-center text-[10px]">?</div>
                                     )}
                                     {isMulti && (
                                         <div className="absolute -bottom-1 -right-1 bg-stone-700 text-white text-[8px] rounded-full px-1">
@@ -289,18 +270,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
         {/* --- MAIN AREA (Chat OR New Selection) --- */}
         <div className={`
-            flex-1 flex flex-col bg-stone-50 relative min-w-0
+            flex-1 flex flex-col bg-stone-50 relative
             ${viewMode !== 'list' ? 'flex w-full h-full' : 'hidden md:flex'}
         `}>
             
             {/* MODE: NEW CONVERSATION SELECTION */}
             {viewMode === 'new' && (
                 <div className="absolute inset-0 z-10 bg-white flex flex-col animate-fade-in">
-                    <div className="p-2 border-b border-stone-200 bg-stone-50 flex items-center gap-2 h-[45px]">
+                    <div className="p-2 border-b border-stone-200 bg-stone-50 flex items-center gap-2">
                         <button onClick={() => setViewMode('list')} className="md:hidden text-stone-500 font-bold px-2">←</button>
                         <input 
                             type="text" 
-                            placeholder="Rechercher un pays..." 
+                            placeholder="Pays..." 
                             className="flex-1 p-1 rounded border border-stone-300 text-xs focus:outline-blue-500"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
@@ -324,11 +305,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                 : 'bg-stone-300 text-stone-500 cursor-not-allowed'
                             }`}
                         >
-                            Démarrer
+                            OK
                         </button>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-2 grid grid-cols-2 md:grid-cols-3 gap-1 content-start">
+                    <div className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-1 content-start">
                         {filteredCountries.map(country => {
                             const flag = getFlagUrl(country);
                             const isSelected = newChatSelection.includes(country);
@@ -361,16 +342,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             {(viewMode === 'chat' || (viewMode === 'list' && activeParticipants.length > 0 && window.innerWidth >= 768)) && activeParticipants.length > 0 ? (
                 <>
                     {/* Chat Header */}
-                    <div className="bg-white border-b border-stone-200 p-2 shadow-sm flex items-center justify-between z-10 h-[45px]">
-                        <div className="flex items-center gap-2 overflow-hidden">
+                    <div className="bg-white border-b border-stone-200 p-2 shadow-sm flex items-center justify-between z-10">
+                        <div className="flex items-center gap-2">
                             <button onClick={() => setViewMode('list')} className="md:hidden text-stone-500 font-bold pr-1">←</button>
-                            <div className="flex -space-x-1 shrink-0">
+                            <div className="flex -space-x-1 overflow-hidden">
                                 {activeParticipants.slice(0, 3).map(p => (
                                     <img key={p} src={getFlagUrl(p) || ''} alt="" className="inline-block h-5 w-7 rounded shadow-md object-cover ring-1 ring-white" />
                                 ))}
                             </div>
-                            <div className="min-w-0">
-                                <h3 className="font-bold text-stone-800 text-sm leading-tight truncate">
+                            <div>
+                                <h3 className="font-bold text-stone-800 text-xs leading-tight">
                                     {activeParticipants.join(', ')}
                                 </h3>
                             </div>
@@ -382,7 +363,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     <div className="flex-1 overflow-y-auto p-2 bg-stone-100 flex flex-col" ref={scrollRef}>
                         {activeThreadMessages.length === 0 ? (
                             <div className="m-auto text-center opacity-50">
-                                <p className="text-xs text-stone-500 font-bold">Début du canal diplomatique sécurisé.</p>
+                                <p className="text-xs text-stone-500 font-bold">Début canal.</p>
                             </div>
                         ) : (
                             activeThreadMessages.map(msg => (
@@ -425,7 +406,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             type="text"
                             value={inputText}
                             onChange={(e) => setInputText(e.target.value)}
-                            placeholder="Message diplomatique..."
+                            placeholder="..."
                             className="flex-1 p-2 rounded-full border border-stone-300 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-stone-50"
                             disabled={isProcessing}
                             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
