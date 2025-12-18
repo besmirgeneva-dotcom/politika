@@ -819,22 +819,34 @@ const App: React.FC = () => {
     let newChatHistory = [...gameState.chatHistory];
     
     if (result.incomingMessages && result.incomingMessages.length > 0) {
+        // --- FILTRE STRICT : UNIQUEMENT PAYS, ONU, UE, OTAN ---
+        const VALID_SENDER_OVERRIDES = ["ONU", "UN", "UE", "EU", "OTAN", "NATO"];
+        
         result.incomingMessages.forEach(msg => {
             const normalizedSender = normalizeCountryName(msg.sender);
-            const normalizedTargets = msg.targets.map(t => normalizeCountryName(t));
-            if (!normalizedTargets.includes(gameState.playerCountry!)) {
-                normalizedTargets.push(gameState.playerCountry!);
+            
+            // Check if it's a known country OR a valid international org
+            const isValidSender = ALL_COUNTRIES_LIST.includes(normalizedSender) || VALID_SENDER_OVERRIDES.includes(normalizedSender.toUpperCase());
+
+            if (isValidSender) {
+                const normalizedTargets = msg.targets.map(t => normalizeCountryName(t));
+                if (!normalizedTargets.includes(gameState.playerCountry!)) {
+                    normalizedTargets.push(gameState.playerCountry!);
+                }
+                newChatHistory.push({
+                    id: `msg-${Date.now()}-${Math.random()}`,
+                    sender: 'ai',
+                    senderName: normalizedSender,
+                    targets: normalizedTargets,
+                    text: msg.text,
+                    timestamp: Date.now(),
+                    isRead: false 
+                });
+                showNotification(`Message diplomatique : ${normalizedSender}`);
+            } else {
+                // Silently ignore invalid senders (e.g. "Ministère", "Rebelles") to respect user preference
+                console.warn(`Message bloqué (Expéditeur invalide): ${msg.sender}`);
             }
-            newChatHistory.push({
-                id: `msg-${Date.now()}-${Math.random()}`,
-                sender: 'ai',
-                senderName: normalizedSender,
-                targets: normalizedTargets,
-                text: msg.text,
-                timestamp: Date.now(),
-                isRead: false 
-            });
-            showNotification(`Message diplomatique : ${normalizedSender}`);
         });
         setHasUnreadChat(true);
     }

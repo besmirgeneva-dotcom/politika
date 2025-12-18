@@ -101,6 +101,15 @@ RÈGLES DE GESTION DES CONSTRUCTIONS (CRITIQUE) :
      -> Ajoute une entrée dans 'infrastructureUpdates' (ex: {country: "France", type: "Usine Auto", change: 1}).
      -> Cela permet de garder en mémoire la puissance industrielle sans polluer la carte.
 
+RÈGLES DIPLOMATIE (incomingMessages) :
+- **INTERDICTION FORMELLE** : Ne jamais générer de messages provenant de "Ministère", "Conseiller", "Secrétaire", "Peuple", "Rebelles", etc.
+- **AUTORISÉS** : Uniquement des entités souveraines ou internationales :
+  1. Pays (ex: "Chine", "Russie", "Allemagne")
+  2. "ONU" (Nations Unies)
+  3. "UE" (Union Européenne)
+  4. "OTAN"
+- Si une information interne doit être transmise (ex: rapport économique), utilise un **EVENT** (type: 'economy' ou 'crisis'), PAS un message chat.
+
 3. **GAMEPLAY ARCADE** : Sois permissif. Si le joueur demande une construction, accorde-la généralement (sauf impossibilité totale).
 
 4. **PUISSANCE** : Une nation Militaire > 60 écrase facilement une nation faible.
@@ -254,6 +263,7 @@ export const simulateTurn = async (
     2. Si construction CIVILE/INDUSTRIELLE (usine, port, centrale) -> Ajoute dans 'infrastructureUpdates' (PAS sur la carte) + crée un événement.
     3. Gameplay permissif (Arcade).
     4. MÉMOIRE : Si "INFRASTRUCTURES" indique "UNCHANGED", utilise l'historique de la conversation pour te souvenir des usines/bases.
+    5. CHAT : Seulement PAYS, ONU, UE, OTAN. Pas de Ministères.
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
