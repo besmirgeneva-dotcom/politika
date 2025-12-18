@@ -70,10 +70,7 @@ const hasSpaceProgramInitial = (country: string): boolean => {
 // Token saving: Map readable type to short string
 const getShortEntityName = (t: MapEntityType) => {
     switch(t) {
-        case 'military_factory': return 'Usine';
-        case 'military_port': return 'Port';
         case 'military_base': return 'Base';
-        case 'airbase': return 'Air';
         case 'defense_system': return 'Défense';
         default: return 'Autre';
     }
@@ -738,16 +735,10 @@ const App: React.FC = () => {
                 }
             } else if (update.type === 'remove_entity') {
                 newEntities = newEntities.filter(e => e.id !== update.entityId && e.label !== update.label);
-            } else if (update.type.startsWith('build_')) {
-                let mType: MapEntityType = 'military_factory';
-                if (update.type === 'build_port') mType = 'military_port';
-                else if (update.type === 'build_airport') mType = 'military_base';
-                else if (update.type === 'build_airbase') mType = 'airbase';
-                else if (update.type === 'build_defense') mType = 'defense_system';
-                
+            } else if (update.type === 'build_base' || update.type === 'build_defense') {
                 newEntities.push({
                     id: `ent-${Date.now()}-${Math.random()}`,
-                    type: mType,
+                    type: update.type as MapEntityType,
                     country: update.targetCountry,
                     lat: update.lat || 0,
                     lng: update.lng || 0,

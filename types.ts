@@ -8,8 +8,8 @@ export interface GameEvent {
   relatedCountry?: string; // Pour centrer la caméra
 }
 
-// Types restreints aux demandes militaires spécifiques
-export type MapEntityType = 'military_factory' | 'military_port' | 'military_base' | 'airbase' | 'defense_system';
+// Types restreints pour nettoyer la map et simplifier le jeu
+export type MapEntityType = 'military_base' | 'defense_system';
 
 export interface MapEntity {
   id: string;
@@ -78,7 +78,7 @@ export interface SimulationResponse {
   corruptionChange: number; // Changement de corruption
   spaceProgramActive?: boolean; // Mise à jour explicite du programme spatial
   mapUpdates?: {
-    type: 'annexation' | 'build_factory' | 'build_port' | 'build_airport' | 'build_airbase' | 'build_defense' | 'remove_entity';
+    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
     targetCountry: string;
     newOwner?: string; // Le pays qui prend le contrôle (ou "INDEPENDENT" pour libération)
     lat?: number;

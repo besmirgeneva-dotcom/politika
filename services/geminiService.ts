@@ -85,22 +85,24 @@ const generateRobustContent = async (
     }
 };
 
-// --- INSTRUCTIONS UNIFIÉES ET RENFORCÉES ---
+// --- INSTRUCTIONS UNIFIÉES ET SIMPLIFIÉES (ARCADE) ---
 const SYSTEM_INSTRUCTION = `
-ROLE: Tu es le "Moteur de Réalité" de GeoSim, une simulation géopolitique sans complaisance.
+ROLE: Tu es le "Moteur de Réalité" de GeoSim, une simulation géopolitique orientée action/stratégie.
 
-RÈGLES DE COMPORTEMENT (CRITIQUE) :
-1. **RÉALISME BRUTAL** : Ne sois pas un simple exécutant des ordres du joueur. Si un ordre est donné, simule sa mise en œuvre RÉELLE.
-2. **ASYMÉTRIE DE PUISSANCE** : Si une nation puissante (Militaire > 70) attaque ou annexe une nation faible, l'annexion militaire doit être FACILE et RAPIDE.
-3. **CARTOGRAPHIE MILITAIRE** : 
-   - Types de marqueurs autorisés UNIQUEMENT : 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense'.
+RÈGLES DE COMPORTEMENT (MODIFIÉES "ARCADE") :
+1. **GAMEPLAY AVANT RÉALISME** : Si le joueur demande une construction (usine, port, base), **ACCORDE-LA**. Ne cherche pas de prétextes complexes ("manque de fonderies", "problèmes de main d'œuvre"). Si le joueur a le budget (implicite), ça se construit.
+2. **PUISSANCE CLAIRE** : Si une nation puissante (Militaire > 60) attaque une faible, elle GAGNE rapidement. Pas de guerres d'usure inutiles contre des petits pays.
+3. **SIMPLIFICATION CARTE (CRITIQUE)** :
+   - Il n'y a que 2 types de bâtiments sur la carte :
+     A) 'build_base' : Représente TOUT ce qui est offensif ou logistique (Base militaire, Usine, Aéroport, Port).
+     B) 'build_defense' : Représente la défense (Radar, Batterie missiles, Bunker).
+   - Si le joueur demande une "Usine d'avions", génère un 'build_base' avec le label "Usine Aéro".
    - PRÉCISION : Coordonnées STRICTEMENT à l'intérieur des frontières du pays concerné.
-   - SUPPRESSION : Utilise 'remove_entity' pour retirer des installations.
-4. **PROTOCOLE DE COMMUNICATION (STRICT)** :
-   - **FRÉQUENCE FAIBLE** : Ne génère des messages entrants ('incomingMessages') que TRÈS RAREMENT (max 1 par tour, souvent 0). Le silence diplomatique est la norme.
-   - **FILTRE EXPÉDITEUR** : Seuls les membres de l'alliance du joueur (ex: OTAN, UE) ou les Superpuissances (USA, Chine, Russie) en cas de crise majeure peuvent initier un message. Les petits pays n'écrivent JAMAIS sauf s'ils sont directement envahis par le joueur.
-   - **CONTENU** : Pas de politesses inutiles. Uniquement des demandes d'aide, des menaces crédibles ou des informations stratégiques vitales.
-5. **STYLE ÉDITORIAL** : Rapports de renseignement (AFP, Reuters).
+   - SUPPRESSION : Utilise 'remove_entity'.
+4. **MESSAGERIE** : Silence diplomatique par défaut. Seulement des messages vitaux des Alliés ou des Superpuissances.
+5. **STYLE** : Rapports de renseignement concis (AFP, Reuters).
+
+RÉSUMÉ : SOIS PERMISSIF SUR LA CONSTRUCTION, MAIS STRATÉGIQUE SUR LES CONSÉQUENCES DIPLOMATIQUES.
 `;
 
 const RESPONSE_SCHEMA_JSON = {
@@ -131,7 +133,7 @@ const RESPONSE_SCHEMA_JSON = {
         items: {
             type: "object",
             properties: {
-                type: { type: "string", enum: ['annexation', 'build_factory', 'build_port', 'build_airport', 'build_airbase', 'build_defense', 'remove_entity'] },
+                type: { type: "string", enum: ['annexation', 'build_base', 'build_defense', 'remove_entity'] },
                 targetCountry: { type: "string" },
                 newOwner: { type: "string" },
                 lat: { type: "number" },
@@ -235,10 +237,10 @@ export const simulateTurn = async (
     DIPLOMATIE ACTUELLE: ${diplomaticContext}
 
     CONSIGNES DE SIMULATION :
-    1. Traite l'ordre du joueur avec nuance.
-    2. Respecte les types d'entités demandés ('remove_entity' pour suppression).
+    1. Si le joueur demande une construction, sois permissif. Convertis usines/ports en 'build_base'.
+    2. Respecte les types d'entités limités : 'build_base' (tout complexe militaire/indus) ou 'build_defense' (défensif).
     3. COORDONNÉES: STRICTEMENT dans le pays cible.
-    4. MESSAGES: TRES RAREMENT. Seulement si CRITIQUE, et seulement de la part des ALLIÉS (${alliance ? alliance.members.join(', ') : 'Aucun'}) ou des SUPERPUISSANCES.
+    4. MESSAGES: TRES RAREMENT. Seulement si CRITIQUE.
     5. Produis au moins 2 événements majeurs.
   `;
 
