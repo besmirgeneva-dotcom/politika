@@ -9,7 +9,6 @@ const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || "";
 export type AIProvider = 'gemini' | 'groq';
 
 // --- OPTIMIZATION: MINIFIED SCHEMA KEYS ---
-// To save output tokens, we ask the AI for short keys and map them back to full types.
 const MINIFIED_SCHEMA = {
     type: Type.OBJECT,
     properties: {
@@ -89,7 +88,6 @@ const MINIFIED_SCHEMA = {
     required: ["ti", "ev", "gt", "ec", "mi", "po", "co"],
 };
 
-// Map the minified JSON back to the full SimulationResponse for the app
 const mapMinifiedToFull = (min: any): SimulationResponse => {
     return {
         timeIncrement: min.ti,
@@ -135,7 +133,6 @@ const mapMinifiedToFull = (min: any): SimulationResponse => {
     };
 };
 
-// --- RETRY LOGIC (Exponential Backoff) ---
 const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
     try {
         return await fn();
@@ -175,7 +172,6 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
     }
 };
 
-// --- CONDENSED SYSTEM INSTRUCTIONS (TOKEN SAVING) ---
 const SYSTEM_INSTRUCTION = `
 Tu es le Moteur de Réalité de GeoSim.
 RÈGLES STRICTES:
@@ -227,12 +223,10 @@ export const simulateTurn = async (
   alliance: Alliance | null = null
 ): Promise<SimulationResponse> => {
   
-  // Compact Context
   const hist = recentHistory.slice(-15).map(e => `[${e.date}]${e.type}:${e.headline}`).join('\n');
   const allContext = alliance ? `ALLIANCE:${alliance.name}(${alliance.leader})` : "NON-ALIGNÉ";
   
   // OPTIMIZATION 1: TERRITORIES TRUNCATION
-  // If the player owns > 5 territories, we only send the main one + count to save tokens.
   const territoriesStr = ownedTerritories.length > 5 
     ? `${ownedTerritories[0]} (+${ownedTerritories.length - 1} territoires)` 
     : ownedTerritories.join(',');
@@ -289,7 +283,6 @@ export const sendDiplomaticMessage = async (
     Réponds JSON minifié: [{ "s": "Pays", "t": "..." }]
     `;
 
-    // Minified Chat Schema
     const CHAT_SCHEMA = {
         type: Type.ARRAY,
         items: {
@@ -329,8 +322,6 @@ const getFallbackResponse = (): SimulationResponse => ({
     globalTensionChange: 0, economyHealthChange: 0, militaryPowerChange: 0, popularityChange: 0, corruptionChange: 0
 });
 
-// OPTIMIZATION 3: This function is now deprecated in favor of pre-calculation, 
-// but kept as fallback or for manual invocation if needed (though UI uses local state now).
 export const getStrategicSuggestions = async (
     playerCountry: string,
     recentHistory: GameEvent[],
