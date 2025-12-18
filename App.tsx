@@ -142,6 +142,7 @@ const App: React.FC = () => {
     playerCountry: null,
     ownedTerritories: [],
     mapEntities: [],
+    infrastructure: {}, // NOUVEAU: Pour stocker les usines, etc.
     turn: 1,
     events: [],
     isProcessing: false,
@@ -460,6 +461,7 @@ const App: React.FC = () => {
         playerCountry: null,
         ownedTerritories: [],
         mapEntities: [],
+        infrastructure: {}, // Init empty infrastructure
         turn: 1,
         events: [],
         isProcessing: false,
@@ -664,22 +666,40 @@ const App: React.FC = () => {
 
     setGameState(prev => ({ ...prev, isProcessing: true }));
 
-    // STRATÉGIE 2 : AGRÉGATION DES ENTITÉS (Token Saving)
-    // Au lieu d'envoyer la liste brute de 50 usines, on envoie un résumé.
-    const summaryMap: Record<string, Record<string, number>> = {};
-    gameState.mapEntities.forEach(ent => {
-        if (!summaryMap[ent.country]) summaryMap[ent.country] = {};
-        const label = getShortEntityName(ent.type);
-        summaryMap[ent.country][label] = (summaryMap[ent.country][label] || 0) + 1;
-    });
+    // STRATÉGIE 2 : AGRÉGATION DES ENTITÉS (Token Saving) & INFRASTRUCTURE
+    // --- NOUVELLE OPTIMISATION : ENVOYER LE CONTEXTE COMPLET SEULEMENT TOUS LES 10 TOURS ---
+    const shouldSendFullContext = gameState.turn === 1 || gameState.turn % 10 === 0;
     
-    // Construction de la string résumée : "France: 5 Usine, 2 Port; Allemagne: 1 Base"
-    const entitiesSummary = Object.entries(summaryMap).map(([country, counts]) => {
-        const countsStr = Object.entries(counts)
-            .map(([type, count]) => `${count} ${type}`)
-            .join(', ');
-        return `${country}: ${countsStr}`;
-    }).join('; ');
+    let entitiesSummary = "UNCHANGED_FROM_PREVIOUS_REPORTS"; // Placeholder pour économiser les tokens
+
+    if (shouldSendFullContext) {
+        const summaryMap: Record<string, Record<string, number>> = {};
+        
+        // 1. Ajouter les entités de la carte (Bases, Défenses)
+        gameState.mapEntities.forEach(ent => {
+            if (!summaryMap[ent.country]) summaryMap[ent.country] = {};
+            const label = getShortEntityName(ent.type);
+            summaryMap[ent.country][label] = (summaryMap[ent.country][label] || 0) + 1;
+        });
+
+        // 2. Ajouter les infrastructures invisibles (Usines, etc.)
+        if (gameState.infrastructure) {
+            Object.entries(gameState.infrastructure).forEach(([country, infraTypes]) => {
+                if (!summaryMap[country]) summaryMap[country] = {};
+                Object.entries(infraTypes).forEach(([type, count]) => {
+                    summaryMap[country][type] = (summaryMap[country][type] || 0) + count;
+                });
+            });
+        }
+        
+        // 3. Construction du résumé textuel combiné pour l'IA
+        entitiesSummary = Object.entries(summaryMap).map(([country, counts]) => {
+            const countsStr = Object.entries(counts)
+                .map(([type, count]) => `${count} ${type}`)
+                .join(', ');
+            return `${country}: ${countsStr}`;
+        }).join('; ');
+    }
 
     const isLandlocked = isCountryLandlocked(gameState.playerCountry);
     const recentChat = gameState.chatHistory.slice(-10).map(m => `${m.sender === 'player' ? 'Joueur' : m.senderName}: ${m.text}`).join(' | ');
@@ -690,7 +710,7 @@ const App: React.FC = () => {
         finalOrderString,
         gameState.events,
         gameState.ownedTerritories,
-        entitiesSummary, // Passage du résumé au lieu du tableau brut
+        entitiesSummary, // Passage du résumé (complet ou placeholder)
         isLandlocked,
         gameState.hasNuclear,
         recentChat,
@@ -716,9 +736,12 @@ const App: React.FC = () => {
 
     let newOwnedTerritories = [...gameState.ownedTerritories];
     let newEntities = [...gameState.mapEntities];
+    let newInfrastructure = JSON.parse(JSON.stringify(gameState.infrastructure || {})); // Deep copy
+
     let newHasNuclear = gameState.hasNuclear;
     let cameraTarget = gameState.playerCountry;
 
+    // --- MISE À JOUR CARTE (VISUEL) ---
     if (result.mapUpdates) {
         for (const update of result.mapUpdates) {
             if (update.type === 'annexation') {
@@ -744,6 +767,26 @@ const App: React.FC = () => {
                     lng: update.lng || 0,
                     label: update.label
                 });
+            }
+        }
+    }
+
+    // --- MISE À JOUR INFRASTRUCTURE (MÉMOIRE) ---
+    if (result.infrastructureUpdates) {
+        for (const update of result.infrastructureUpdates) {
+            const country = update.country;
+            const type = update.type;
+            const change = update.change;
+            
+            if (!newInfrastructure[country]) newInfrastructure[country] = {};
+            
+            const currentCount = newInfrastructure[country][type] || 0;
+            const newCount = Math.max(0, currentCount + change);
+            
+            if (newCount === 0) {
+                delete newInfrastructure[country][type];
+            } else {
+                newInfrastructure[country][type] = newCount;
             }
         }
     }
@@ -836,6 +879,7 @@ const App: React.FC = () => {
         turn: gameState.turn + 1,
         ownedTerritories: newOwnedTerritories,
         mapEntities: newEntities,
+        infrastructure: newInfrastructure, // Mise à jour de l'infra
         globalTension: newGlobalTension,
         economyHealth: newEconomyHealth,
         militaryPower: newMilitaryPower,
@@ -1247,7 +1291,7 @@ const App: React.FC = () => {
                   </div>
               )}
               {notification && (
-                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-[60] animate-fade-in-down text-sm font-bold flex items-center gap-2">
+                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2">
                     <span className="text-emerald-400">✓</span> {notification}
                 </div>
               )}

@@ -45,26 +45,27 @@ export interface GameState {
   playerCountry: string | null;
   ownedTerritories: string[];
   mapEntities: MapEntity[];
+  infrastructure: Record<string, Record<string, number>>; // NOUVEAU: Stockage mémoire des usines/infra par pays
   turn: number;
   events: GameEvent[];
   isProcessing: boolean;
   globalTension: number;
   economyHealth: number;
   militaryPower: number;
-  popularity: number; // Nouvelle stat: Popularité (0-100)
-  corruption: number; // Nouvelle stat: Corruption (0-100, 0 = intègre, 100 = état failli)
+  popularity: number;
+  corruption: number;
   hasNuclear: boolean;
-  hasSpaceProgram: boolean; // Nouvelle stat: Capacité spatiale
-  militaryRank: number; // Nouvelle stat: Classement mondial (1-195)
+  hasSpaceProgram: boolean;
+  militaryRank: number;
   chatHistory: ChatMessage[];
   chaosLevel: ChaosLevel;
   alliance: Alliance | null;
-  isGameOver: boolean; // État de défaite
+  isGameOver: boolean;
   gameOverReason: string | null;
 }
 
 export interface SimulationResponse {
-  timeIncrement: 'day' | 'month' | 'year'; // L'IA décide du saut temporel
+  timeIncrement: 'day' | 'month' | 'year';
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
     headline: string;
@@ -74,17 +75,24 @@ export interface SimulationResponse {
   globalTensionChange: number;
   economyHealthChange: number;
   militaryPowerChange: number;
-  popularityChange: number; // Changement de popularité
-  corruptionChange: number; // Changement de corruption
-  spaceProgramActive?: boolean; // Mise à jour explicite du programme spatial
+  popularityChange: number;
+  corruptionChange: number;
+  spaceProgramActive?: boolean;
+  // Mises à jour visuelles (Carte)
   mapUpdates?: {
     type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
     targetCountry: string;
-    newOwner?: string; // Le pays qui prend le contrôle (ou "INDEPENDENT" pour libération)
+    newOwner?: string;
     lat?: number;
     lng?: number;
     label?: string;
-    entityId?: string; // Pour la suppression
+    entityId?: string;
+  }[];
+  // Mises à jour invisibles (Mémoire / Stats)
+  infrastructureUpdates?: {
+      country: string;
+      type: string; // ex: "usine_munitions", "port_civil"
+      change: number; // +1 ou -1
   }[];
   incomingMessages?: {
       sender: string;

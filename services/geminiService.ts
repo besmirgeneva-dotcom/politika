@@ -85,24 +85,27 @@ const generateRobustContent = async (
     }
 };
 
-// --- INSTRUCTIONS UNIFIÉES ET SIMPLIFIÉES (ARCADE) ---
+// --- INSTRUCTIONS UNIFIÉES ET SIMPLIFIÉES (ARCADE + SEPARATION VISUELLE) ---
 const SYSTEM_INSTRUCTION = `
-ROLE: Tu es le "Moteur de Réalité" de GeoSim, une simulation géopolitique orientée action/stratégie.
+ROLE: Tu es le "Moteur de Réalité" de GeoSim, une simulation géopolitique.
 
-RÈGLES DE COMPORTEMENT (MODIFIÉES "ARCADE") :
-1. **GAMEPLAY AVANT RÉALISME** : Si le joueur demande une construction (usine, port, base), **ACCORDE-LA**. Ne cherche pas de prétextes complexes ("manque de fonderies", "problèmes de main d'œuvre"). Si le joueur a le budget (implicite), ça se construit.
-2. **PUISSANCE CLAIRE** : Si une nation puissante (Militaire > 60) attaque une faible, elle GAGNE rapidement. Pas de guerres d'usure inutiles contre des petits pays.
-3. **SIMPLIFICATION CARTE (CRITIQUE)** :
-   - Il n'y a que 2 types de bâtiments sur la carte :
-     A) 'build_base' : Représente TOUT ce qui est offensif ou logistique (Base militaire, Usine, Aéroport, Port).
-     B) 'build_defense' : Représente la défense (Radar, Batterie missiles, Bunker).
-   - Si le joueur demande une "Usine d'avions", génère un 'build_base' avec le label "Usine Aéro".
-   - PRÉCISION : Coordonnées STRICTEMENT à l'intérieur des frontières du pays concerné.
-   - SUPPRESSION : Utilise 'remove_entity'.
-4. **MESSAGERIE** : Silence diplomatique par défaut. Seulement des messages vitaux des Alliés ou des Superpuissances.
-5. **STYLE** : Rapports de renseignement concis (AFP, Reuters).
+RÈGLES DE GESTION DES CONSTRUCTIONS (CRITIQUE) :
+1. **SUR LA CARTE (mapUpdates)** : UNIQUEMENT pour les structures militaires majeures ou défensives.
+   - Types autorisés : 'build_base' (Base militaire, Port militaire, Aéroport militaire) et 'build_defense' (Radar, Silo, Bunker).
+   - SI le joueur demande une "Base", "Base navale", "Défense anti-aérienne" -> 'mapUpdates'.
 
-RÉSUMÉ : SOIS PERMISSIF SUR LA CONSTRUCTION, MAIS STRATÉGIQUE SUR LES CONSÉQUENCES DIPLOMATIQUES.
+2. **EN MÉMOIRE (infrastructureUpdates)** : POUR TOUT LE RESTE.
+   - Si le joueur demande "Usine", "Port civil", "École", "Hôpital", "Centrale électrique" :
+     -> NE METS RIEN SUR LA CARTE.
+     -> Génère un événement "Construction terminée".
+     -> Ajoute une entrée dans 'infrastructureUpdates' (ex: {country: "France", type: "Usine Auto", change: 1}).
+     -> Cela permet de garder en mémoire la puissance industrielle sans polluer la carte.
+
+3. **GAMEPLAY ARCADE** : Sois permissif. Si le joueur demande une construction, accorde-la généralement (sauf impossibilité totale).
+
+4. **PUISSANCE** : Une nation Militaire > 60 écrase facilement une nation faible.
+
+5. **STYLE** : Rapports de type "Dépêche AFP/Reuters".
 `;
 
 const RESPONSE_SCHEMA_JSON = {
@@ -143,6 +146,18 @@ const RESPONSE_SCHEMA_JSON = {
             },
             required: ['type', 'targetCountry']
         }
+      },
+      infrastructureUpdates: {
+          type: "array",
+          items: {
+              type: "object",
+              properties: {
+                  country: { type: "string" },
+                  type: { type: "string" },
+                  change: { type: "integer" }
+              },
+              required: ["country", "type", "change"]
+          }
       },
       incomingMessages: {
           type: "array",
@@ -202,7 +217,7 @@ export const simulateTurn = async (
   playerAction: string,
   recentHistory: GameEvent[],
   ownedTerritories: string[] = [],
-  entitiesSummary: string = "", // CHANGEMENT: Reçoit une string résumée au lieu d'un tableau
+  entitiesSummary: string = "", // Reçoit le résumé combiné (Map + Infra)
   isLandlocked: boolean = false,
   hasNuclear: boolean = false,
   diplomaticContext: string = "",
@@ -213,9 +228,7 @@ export const simulateTurn = async (
 ): Promise<SimulationResponse> => {
   
   // STRATEGIE 3 : COMPRESSION HISTORIQUE
-  // On ne garde que les dates et les titres, on supprime les descriptions
   const historyContext = recentHistory.slice(-15).map(e => `[${e.date}] ${e.type.toUpperCase()}: ${e.headline}`).join('\n');
-  
   const allianceContext = alliance ? `MEMBRE DE: ${alliance.name} (Leader: ${alliance.leader}). ALLIÉS: ${alliance.members.join(', ')}` : "NON-ALIGNÉ";
   
   const prompt = `
@@ -228,20 +241,19 @@ export const simulateTurn = async (
     
     ACTION DU JOUEUR (A TRAITER): "${playerAction || "Maintien de l'ordre."}"
     
-    HISTORIQUE RECENT (Titres uniquement):
+    HISTORIQUE RECENT:
     ${historyContext}
 
-    INSTALLATIONS ACTUELLES (Résumé): 
-    ${entitiesSummary || "Aucune infrastructure majeure."}
+    INFRASTRUCTURES & BASES (MÉMOIRE GLOBALE): 
+    ${entitiesSummary || "Aucune infrastructure connue."}
 
     DIPLOMATIE ACTUELLE: ${diplomaticContext}
 
-    CONSIGNES DE SIMULATION :
-    1. Si le joueur demande une construction, sois permissif. Convertis usines/ports en 'build_base'.
-    2. Respecte les types d'entités limités : 'build_base' (tout complexe militaire/indus) ou 'build_defense' (défensif).
-    3. COORDONNÉES: STRICTEMENT dans le pays cible.
-    4. MESSAGES: TRES RAREMENT. Seulement si CRITIQUE.
-    5. Produis au moins 2 événements majeurs.
+    CONSIGNES:
+    1. Si construction MILITAIRE (base, défense) -> Ajoute dans 'mapUpdates'.
+    2. Si construction CIVILE/INDUSTRIELLE (usine, port, centrale) -> Ajoute dans 'infrastructureUpdates' (PAS sur la carte) + crée un événement.
+    3. Gameplay permissif (Arcade).
+    4. MÉMOIRE : Si "INFRASTRUCTURES" indique "UNCHANGED", utilise l'historique de la conversation pour te souvenir des usines/bases.
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
@@ -262,10 +274,11 @@ export const simulateTurn = async (
   } catch (error) { return getFallbackResponse(); }
 };
 
-// --- NOUVEAU: BATCHING POUR LE CHAT DIPLOMATIQUE ---
+// ... (Reste du fichier inchangé : sendDiplomaticMessage, getStrategicSuggestions, etc.)
+// Je remets le reste du code pour être sûr que tout fonctionne
 export const sendDiplomaticMessage = async (
     playerCountry: string,
-    targets: string[], // On reçoit maintenant un tableau
+    targets: string[],
     message: string,
     history: ChatMessage[],
     context: { 
@@ -273,12 +286,11 @@ export const sendDiplomaticMessage = async (
         economyHealth: number; 
         globalTension: number; 
         hasNuclear: boolean; 
-        playerAllies: string[]; // Ajout de la liste des alliés pour la logique d'annexion
+        playerAllies: string[];
     },
     provider: AIProvider = 'gemini'
-): Promise<{ sender: string, text: string }[]> => { // Retourne un tableau de réponses
+): Promise<{ sender: string, text: string }[]> => {
     
-    // Compression du contexte de conversation (Derniers messages pertinents)
     const conversationContext = history
         .filter(msg => targets.includes(msg.senderName) || (msg.sender === 'player' && msg.targets.some(t => targets.includes(t))))
         .slice(-6)
@@ -289,7 +301,7 @@ export const sendDiplomaticMessage = async (
     Tu incarnes les dirigeants de ces pays : ${targets.join(', ')}.
     
     CONTEXTE :
-    - Expéditeur : ${playerCountry} (Puissance: ${context.militaryPower}/100, Nucléaire: ${context.hasNuclear ? "OUI" : "NON"}).
+    - Expéditeur : ${playerCountry} (Puissance: ${context.militaryPower}/100).
     - Tes Alliés : ${context.playerAllies.join(', ')}.
     - Historique Conversation : 
     ${conversationContext}
@@ -297,20 +309,10 @@ export const sendDiplomaticMessage = async (
     MESSAGE REÇU : "${message}"
 
     CONSIGNES DE RÉPONSE :
-    1. Chaque pays ciblé doit décider s'il répond ou reste silencieux (pour éviter le spam).
-    2. Si le message ne concerne pas directement un pays ou n'est pas intéressant, NE RÉPONDS PAS pour ce pays.
-    
-    RÈGLE SPÉCIALE ANNEXION (CRITIQUE) :
-    - Si le joueur demande l'annexion ("annexation", "rejoindre", "fusionner") à un pays qui est son ALLIÉ et qui est plus FAIBLE :
-      NE REFUSE PAS DIRECTEMENT. Montre de l'intérêt mais EXIGE des conditions : "Quelles garanties pour notre peuple ?", "Nous voulons préserver notre culture", "Quel statut aurons-nous ?".
-    - Si le pays n'est PAS allié ou est PUISSANT : Refuse fermement ("Jamais !", "C'est une déclaration de guerre ?").
+    1. Réponse si pertinent uniquement (anti-spam).
+    2. ANNEXION : Si allié + faible -> Négocie ("Garanties ?"). Si fort/ennemi -> Refuse.
 
-    FORMAT DE SORTIE JSON UNIQUEMENT :
-    [
-      { "sender": "NomDuPays", "text": "Sa réponse..." },
-      ...
-    ]
-    Si personne ne répond, renvoie [].
+    FORMAT JSON : [{ "sender": "Pays", "text": "..." }]
     `;
 
     const CHAT_SCHEMA = {
@@ -355,7 +357,6 @@ export const getStrategicSuggestions = async (
     recentHistory: GameEvent[],
     provider: AIProvider = 'gemini'
 ): Promise<string[]> => {
-    // Compression historique ici aussi
     const historyContext = recentHistory.slice(-5).map(e => e.headline).join('\n');
     const prompt = `Suggère 3 actions machiavéliques ou diplomatiques pour ${playerCountry} sachant que : ${historyContext}. Format JSON: {"suggestions": ["..."]}`;
     try {
