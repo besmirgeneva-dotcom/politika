@@ -8,80 +8,78 @@ const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || "";
 
 export type AIProvider = 'gemini' | 'groq';
 
-// --- OPTIMIZATION: MINIFIED SCHEMA KEYS ---
-// To save output tokens, we ask the AI for short keys and map them back to full types.
+// --- OPTIMIZATION: MINIFIED SCHEMA KEYS (Saves ~30% output tokens) ---
 const MINIFIED_SCHEMA = {
     type: Type.OBJECT,
     properties: {
-      ti: { type: Type.STRING, enum: ["day", "month", "year"] }, // timeIncrement
-      ev: { // events
+      ti: { type: Type.STRING, enum: ["day", "month", "year"] }, 
+      ev: { 
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
           properties: {
-            t: { type: Type.STRING, enum: ["world", "crisis", "economy", "war", "alliance"] }, // type
-            h: { type: Type.STRING }, // headline
-            d: { type: Type.STRING }, // description
-            rc: { type: Type.STRING } // relatedCountry
+            t: { type: Type.STRING, enum: ["world", "crisis", "economy", "war", "alliance"] },
+            h: { type: Type.STRING },
+            d: { type: Type.STRING },
+            rc: { type: Type.STRING }
           },
           required: ["t", "h", "d"]
         },
       },
-      gt: { type: Type.INTEGER }, // globalTensionChange
-      ec: { type: Type.INTEGER }, // economyHealthChange
-      mi: { type: Type.INTEGER }, // militaryPowerChange
-      po: { type: Type.INTEGER }, // popularityChange
-      co: { type: Type.INTEGER }, // corruptionChange
-      sp: { type: Type.BOOLEAN }, // spaceProgramActive
-      sg: { type: Type.ARRAY, items: { type: Type.STRING } }, // strategicSuggestions (Optimisation Conflict Resolution)
-      mu: { // mapUpdates
+      gt: { type: Type.INTEGER }, 
+      ec: { type: Type.INTEGER }, 
+      mi: { type: Type.INTEGER }, 
+      po: { type: Type.INTEGER }, 
+      co: { type: Type.INTEGER }, 
+      sp: { type: Type.BOOLEAN }, 
+      mu: { 
         type: Type.ARRAY,
         items: {
             type: Type.OBJECT,
             properties: {
                 t: { type: Type.STRING, enum: ['annexation', 'build_base', 'build_defense', 'remove_entity'] },
-                tc: { type: Type.STRING }, // targetCountry
-                no: { type: Type.STRING }, // newOwner
+                tc: { type: Type.STRING },
+                no: { type: Type.STRING },
                 lat: { type: Type.NUMBER },
                 lng: { type: Type.NUMBER },
-                lbl: { type: Type.STRING }, // label
-                id: { type: Type.STRING } // entityId
+                lbl: { type: Type.STRING },
+                id: { type: Type.STRING }
             },
             required: ['t', 'tc']
         }
       },
-      iu: { // infrastructureUpdates
+      iu: { 
           type: Type.ARRAY,
           items: {
               type: Type.OBJECT,
               properties: {
-                  c: { type: Type.STRING }, // country
-                  t: { type: Type.STRING }, // type
-                  v: { type: Type.INTEGER } // change (value)
+                  c: { type: Type.STRING },
+                  t: { type: Type.STRING },
+                  v: { type: Type.INTEGER }
               },
               required: ["c", "t", "v"]
           }
       },
-      im: { // incomingMessages
+      im: { 
           type: Type.ARRAY,
           items: {
               type: Type.OBJECT,
               properties: {
-                  s: { type: Type.STRING }, // sender
-                  tx: { type: Type.STRING }, // text
-                  tg: { type: Type.ARRAY, items: { type: Type.STRING } } // targets
+                  s: { type: Type.STRING },
+                  tx: { type: Type.STRING },
+                  tg: { type: Type.ARRAY, items: { type: Type.STRING } }
               },
               required: ["s", "tx", "tg"]
           }
       },
-      au: { // allianceUpdate
+      au: { 
           type: Type.OBJECT,
           properties: {
-              a: { type: Type.STRING, enum: ["create", "update", "dissolve"] }, // action
-              n: { type: Type.STRING }, // name
-              t: { type: Type.STRING }, // type
-              m: { type: Type.ARRAY, items: { type: Type.STRING } }, // members
-              l: { type: Type.STRING } // leader
+              a: { type: Type.STRING, enum: ["create", "update", "dissolve"] },
+              n: { type: Type.STRING },
+              t: { type: Type.STRING },
+              m: { type: Type.ARRAY, items: { type: Type.STRING } },
+              l: { type: Type.STRING }
           },
           required: ["a"]
       }
@@ -89,7 +87,6 @@ const MINIFIED_SCHEMA = {
     required: ["ti", "ev", "gt", "ec", "mi", "po", "co"],
 };
 
-// Map the minified JSON back to the full SimulationResponse for the app
 const mapMinifiedToFull = (min: any): SimulationResponse => {
     return {
         timeIncrement: min.ti,
@@ -105,7 +102,6 @@ const mapMinifiedToFull = (min: any): SimulationResponse => {
         popularityChange: min.po || 0,
         corruptionChange: min.co || 0,
         spaceProgramActive: min.sp,
-        strategicSuggestions: min.sg || [], // Resolution de conflit : Mapping des suggestions
         mapUpdates: min.mu?.map((u: any) => ({
             type: u.t,
             targetCountry: u.tc,
@@ -135,81 +131,14 @@ const mapMinifiedToFull = (min: any): SimulationResponse => {
     };
 };
 
-// --- RETRY LOGIC (Exponential Backoff) ---
-const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
-    try {
-        return await fn();
-    } catch (error: any) {
-        let isRateLimit = error?.status === 429 || error?.message?.includes("429");
-        let isServerOverload = error?.status === 503 || error?.message?.includes("503");
-        
-        if (retries > 0 && (isRateLimit || isServerOverload)) {
-            const jitter = Math.random() * 500;
-            await new Promise(r => setTimeout(r, delay + jitter));
-            return withRetry(fn, retries - 1, delay * 2);
-        }
-        throw error;
-    }
-};
-
-const generateRobustContent = async (prompt: string, config: any): Promise<any> => {
-    try {
-        return await withRetry(async () => {
-            return await ai.models.generateContent({
-                model: "gemini-3-flash-preview",
-                contents: prompt,
-                config: config
-            });
-        }, 3, 2000);
-    } catch (error) {
-        console.warn("Primary model failed, utilizing fallback.");
-        try {
-            return await withRetry(async () => {
-                return await ai.models.generateContent({
-                    model: "gemini-2.5-flash-lite-latest",
-                    contents: prompt,
-                    config: config
-                });
-            }, 2, 3000);
-        } catch (fbError) { throw fbError; }
-    }
-};
-
-// --- CONDENSED SYSTEM INSTRUCTIONS (TOKEN SAVING) ---
 const SYSTEM_INSTRUCTION = `
-Tu es le Moteur de Réalité de GeoSim.
-RÈGLES STRICTES:
-1. CARTE (mapUpdates/mu): UNIQUEMENT pour 'build_base' (militaire/aérien/naval) ou 'build_defense' (radar/silo). 
-   SI joueur demande "Usine/Port civil/Infra" -> 'infrastructureUpdates/iu' (PAS sur carte).
-2. DIPLOMATIE (incomingMessages/im): Seulement PAYS souverains, ONU, UE, OTAN. Jamais de ministères internes.
-3. GAMEPLAY: Arcade/Permissif. Militaire > 60 écrase les faibles.
-4. INFRA MEMOIRE: Si input dit "UNCHANGED", utilise ta mémoire contextuelle.
-5. CONSEIL: Ajoute TOUJOURS 3 suggestions courtes pour le prochain tour dans 'sg'.
-6. FORMAT: Réponds UNIQUEMENT via le schéma JSON minifié fourni.
+Moteur GeoSim. Règles strictes pour tokens :
+1. CARTE (mu): Uniquement 'build_base' ou 'build_defense'.
+2. INFRA (iu): Pour constructions civiles (usines/ports).
+3. PAYS: Ne mentionne que les souverains.
+4. HISTOIRE: Utilise le contexte partiel fourni.
+5. FORMAT: JSON MINIFIÉ UNIQUEMENT.
 `;
-
-const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
-    try {
-        if (!GROQ_API_KEY) throw new Error("No Groq Key");
-        let sys = system;
-        if (jsonMode && schema) sys += "\nJSON SCHEMA:\n" + JSON.stringify(schema);
-        
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-                messages: [{ role: "system", content: sys }, { role: "user", content: prompt }],
-                model: "llama-3.3-70b-versatile",
-                temperature: 0.85,
-                max_tokens: 2048,
-                response_format: jsonMode ? { type: "json_object" } : undefined
-            })
-        });
-        if (!response.ok) throw new Error(`Groq ${response.status}`);
-        const data = await response.json();
-        return data.choices[0]?.message?.content || "";
-    } catch (e) { throw e; }
-};
 
 export const simulateTurn = async (
   playerCountry: string,
@@ -227,42 +156,42 @@ export const simulateTurn = async (
   alliance: Alliance | null = null
 ): Promise<SimulationResponse> => {
   
-  // Compact Context
-  const hist = recentHistory.slice(-15).map(e => `[${e.date}]${e.type}:${e.headline}`).join('\n');
-  const allContext = alliance ? `ALLIANCE:${alliance.name}(${alliance.leader})` : "NON-ALIGNÉ";
+  // OPTIMIZATION: Reduce history size sent to IA (10 instead of 15)
+  const hist = recentHistory.slice(-10).map(e => `[${e.date}]${e.type}:${e.headline}`).join('\n');
+  const allContext = alliance ? `ALLIANCE:${alliance.name}` : "N/A";
   
-  // OPTIMIZATION 1: TERRITORIES TRUNCATION
-  // Resolution de conflit : Envoi d'une version tronquée des territoires pour sauver des tokens
-  const territoriesStr = ownedTerritories.length > 5 
-    ? `${ownedTerritories[0]} (+${ownedTerritories.length - 1} territoires)` 
+  // OPTIMIZATION: Truncate territory list if too long
+  const territoryText = ownedTerritories.length > 5 
+    ? `${ownedTerritories[0]} (+${ownedTerritories.length - 1} terr.)`
     : ownedTerritories.join(',');
 
   const prompt = `
-    DATE:${currentDate}|PAYS:${playerCountry}(Mil:${playerPower})|POSS:${territoriesStr}|CHAOS:${chaosLevel}|${allContext}
+    DATE:${currentDate}|PAYS:${playerCountry}(Pow:${playerPower})|POSS:${territoryText}|CHAOS:${chaosLevel}|${allContext}
     ACTION:"${playerAction || "Rien"}"
-    HIST:
-    ${hist}
+    HIST:${hist}
     INFRA:${entitiesSummary}
     DIPLO:${diplomaticContext}
-    Si constr. CIVILE -> 'iu'. Si MILITAIRE -> 'mu'.
   `;
 
-  if (provider === 'groq' && GROQ_API_KEY) {
-      try {
-          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, MINIFIED_SCHEMA);
-          return mapMinifiedToFull(JSON.parse(jsonStr));
-      } catch (e) { console.warn("Groq fail, fallback Gemini"); }
-  } 
-  
   try {
-      const response = await generateRobustContent(prompt, {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseSchema: MINIFIED_SCHEMA,
-          temperature: 0.85,
+      const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt,
+          config: {
+              systemInstruction: SYSTEM_INSTRUCTION,
+              responseMimeType: "application/json",
+              responseSchema: MINIFIED_SCHEMA,
+              temperature: 0.8,
+          }
       });
       return mapMinifiedToFull(JSON.parse(response.text));
-  } catch (error) { return getFallbackResponse(); }
+  } catch (error) {
+      return {
+          timeIncrement: 'day',
+          events: [{ type: "world", headline: "Instabilité", description: "Le simulateur a rencontré une erreur." }],
+          globalTensionChange: 0, economyHealthChange: 0, militaryPowerChange: 0, popularityChange: 0, corruptionChange: 0
+      };
+  }
 };
 
 export const sendDiplomaticMessage = async (
@@ -273,78 +202,38 @@ export const sendDiplomaticMessage = async (
     context: any,
     provider: AIProvider = 'gemini'
 ): Promise<{ sender: string, text: string }[]> => {
-    
-    const conv = history
-        .filter(msg => targets.includes(msg.senderName) || (msg.sender === 'player' && msg.targets.some(t => targets.includes(t))))
-        .slice(-6)
-        .map(msg => `${msg.sender === 'player' ? playerCountry : msg.senderName}:${msg.text}`)
-        .join('\n');
+    // Optimization: Shorter history for chat
+    const conv = history.slice(-4).map(msg => `${msg.senderName}:${msg.text}`).join('\n');
 
-    const prompt = `
-    Incarne: ${targets.join(', ')}.
-    Contexte: Exp=${playerCountry}(Mil:${context.militaryPower}).
-    Chat:
-    ${conv}
-    Msg: "${message}"
-    Réponds JSON minifié: [{ "s": "Pays", "t": "..." }]
-    `;
+    const prompt = `Incarne:${targets.join(',')}. Exp:${playerCountry}. Hist:${conv}. Msg:"${message}". Réponds JSON:[{"s":"Pays","t":"msg"}]`;
 
-    // Minified Chat Schema
-    const CHAT_SCHEMA = {
-        type: Type.ARRAY,
-        items: {
-            type: Type.OBJECT,
-            properties: {
-                s: { type: Type.STRING }, // sender
-                t: { type: Type.STRING }  // text
-            },
-            required: ["s", "t"]
-        }
-    };
-
-    if (provider === 'groq' && GROQ_API_KEY) {
-        try {
-            const jsonStr = await callGroq(prompt, "Tu es un chef d'état. JSON.", true, CHAT_SCHEMA);
-            const raw = JSON.parse(jsonStr);
-            return raw.map((r: any) => ({ sender: r.s, text: r.t }));
-        } catch (e) { console.warn("Groq fail"); }
-    }
-    
     try {
-        const response = await generateRobustContent(prompt, { 
-            responseMimeType: "application/json",
-            responseSchema: CHAT_SCHEMA,
-            temperature: 0.7 
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: { 
+                responseMimeType: "application/json",
+                temperature: 0.7 
+            }
         });
         const raw = JSON.parse(response.text);
-        return raw.map((r: any) => ({ sender: r.s, text: r.t })) || [];
-    } catch (e) { 
-        return [{ sender: targets[0], text: "..." }]; 
-    }
+        return Array.isArray(raw) ? raw.map((r: any) => ({ sender: r.s || r.sender, text: r.t || r.text })) : [];
+    } catch (e) { return []; }
 }
 
-const getFallbackResponse = (): SimulationResponse => ({
-    timeIncrement: 'day',
-    events: [{ type: "world", headline: "Réseau instable", description: "Connexion aux satellites perdue." }],
-    globalTensionChange: 0, economyHealthChange: 0, militaryPowerChange: 0, popularityChange: 0, corruptionChange: 0
-});
-
-// OPTIMIZATION 3: This function is now deprecated in favor of pre-calculation, 
-// but kept as fallback or for manual invocation if needed (though UI uses local state now).
 export const getStrategicSuggestions = async (
     playerCountry: string,
     recentHistory: GameEvent[],
     provider: AIProvider = 'gemini'
 ): Promise<string[]> => {
-    const hist = recentHistory.slice(-5).map(e => e.headline).join('; ');
-    const prompt = `Suggère 3 actions pour ${playerCountry}. Contexte: ${hist}. JSON: {"s": ["..."]}`;
+    const hist = recentHistory.slice(-3).map(e => e.headline).join('; ');
+    const prompt = `3 actions pour ${playerCountry} (Hist:${hist}). JSON:{"s":["..."]}`;
     try {
-        if (provider === 'groq' && GROQ_API_KEY) {
-             const j = await callGroq(prompt, "Conseiller. JSON.", true, { type: "object", properties: { s: { type: "array", items: { type: "string" } } } });
-             return JSON.parse(j).s;
-        }
-        const response = await generateRobustContent(prompt, { responseMimeType: "application/json" });
-        const p = JSON.parse(response.text);
-        return p.s || p.suggestions || p;
-    } catch (e) { return ["Développer l'industrie", "Renforcer l'armée", "Accords commerciaux"]; }
+        const response = await ai.models.generateContent({ 
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: { responseMimeType: "application/json" } 
+        });
+        return JSON.parse(response.text).s || [];
+    } catch (e) { return ["Développer l'armée", "Améliorer l'économie"]; }
 }
