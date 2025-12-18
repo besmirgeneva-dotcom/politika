@@ -45,7 +45,9 @@ export interface GameState {
   playerCountry: string | null;
   ownedTerritories: string[];
   mapEntities: MapEntity[];
-  infrastructure: Record<string, Record<string, number>>; // NOUVEAU: Stockage mémoire des usines/infra par pays
+  infrastructure: Record<string, Record<string, number>>; 
+  worldSummary: string; // NOUVEAU: Pour la compression du contexte
+  strategicSuggestions: string[]; // NOUVEAU: Pour éviter l'appel API séparé
   turn: number;
   events: GameEvent[];
   isProcessing: boolean;
@@ -66,6 +68,8 @@ export interface GameState {
 
 export interface SimulationResponse {
   timeIncrement: 'day' | 'month' | 'year';
+  worldSummary: string; // NOUVEAU: L'IA résume la situation actuelle
+  strategicSuggestions: string[]; // NOUVEAU: Suggestions pour le tour suivant
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
     headline: string;
@@ -78,7 +82,6 @@ export interface SimulationResponse {
   popularityChange: number;
   corruptionChange: number;
   spaceProgramActive?: boolean;
-  // Mises à jour visuelles (Carte)
   mapUpdates?: {
     type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
     targetCountry: string;
@@ -88,11 +91,10 @@ export interface SimulationResponse {
     label?: string;
     entityId?: string;
   }[];
-  // Mises à jour invisibles (Mémoire / Stats)
   infrastructureUpdates?: {
       country: string;
-      type: string; // ex: "usine_munitions", "port_civil"
-      change: number; // +1 ou -1
+      type: string;
+      change: number;
   }[];
   incomingMessages?: {
       sender: string;
