@@ -1,5 +1,4 @@
 
-
 export interface GameEvent {
   id: string;
   date: string;
@@ -44,8 +43,8 @@ export interface GameState {
   gameId: string;
   currentDate: Date;
   playerCountry: string | null;
-  ownedTerritories: string[];
-  neutralTerritories: string[]; // NOUVEAU: Pays détruits / non revendiqués
+  ownedTerritories: string[]; // Peut contenir "France" ou "France:Bretagne"
+  neutralTerritories: string[]; // Pays détruits / non revendiqués
   mapEntities: MapEntity[];
   infrastructure: Record<string, Record<string, number>>;
   turn: number;
@@ -84,8 +83,8 @@ export interface SimulationResponse {
   nuclearAcquired?: boolean; // NOUVEAU: L'IA valide l'obtention de la bombe
   // Mises à jour visuelles (Carte)
   mapUpdates?: {
-    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity' | 'dissolve'; // NOUVEAU: dissolve
-    targetCountry: string;
+    type: 'annexation' | 'annex_province' | 'build_base' | 'build_defense' | 'remove_entity' | 'dissolve'; // NOUVEAU: annex_province
+    targetCountry: string; // Si annex_province, format "Pays:Province"
     newOwner?: string;
     lat?: number;
     lng?: number;

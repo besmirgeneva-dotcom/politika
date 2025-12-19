@@ -45,8 +45,8 @@ const MINIFIED_SCHEMA = {
         items: {
             type: Type.OBJECT,
             properties: {
-                t: { type: Type.STRING, enum: ['annexation', 'build_base', 'build_defense', 'remove_entity', 'dissolve'] },
-                tc: { type: Type.STRING }, // targetCountry
+                t: { type: Type.STRING, enum: ['annexation', 'annex_province', 'build_base', 'build_defense', 'remove_entity', 'dissolve'] },
+                tc: { type: Type.STRING }, // targetCountry or "Country:Province"
                 no: { type: Type.STRING }, // newOwner
                 lat: { type: Type.NUMBER },
                 lng: { type: Type.NUMBER },
@@ -186,10 +186,11 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Règles:
 1. STATS (gt,ec,mi,po,co): DOIVENT CHANGER à chaque tour. Ne laisse jamais tout à 0. Ajoute de la volatilité (-3 à +3) même sans événement majeur.
-2. CARTE(mu): 'annexation', 'build_base', 'dissolve'.
+2. CARTE(mu): 'annexation' (Pays entier), 'annex_province' (Une partie, ex: "France:Normandie"), 'build_base', 'dissolve'.
 3. INFRA(iu): Civil seulement.
 4. ACTION: Arcade. Si action agressive, tension (gt) doit monter.
 5. FORMAT: JSON minifié uniquement.
+Si le joueur demande d'attaquer une région spécifique, utilise 'annex_province' avec le nom "Pays:Région".
 `;
 
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {

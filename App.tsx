@@ -766,17 +766,32 @@ const App: React.FC = () => {
                 }
                 showNotification(`Territoire détruit : ${target}`);
             } else if (update.type === 'annexation') {
+                // ANNEXATION PAYS ENTIER
                 const target = normalizeCountryName(update.targetCountry); 
                 const newOwner = update.newOwner ? normalizeCountryName(update.newOwner) : gameState.playerCountry;
+                
                 newNeutralTerritories = newNeutralTerritories.filter(t => t !== target);
+                
+                // Retirer de l'ancien propriétaire s'il le possédait
                 if (newOwnedTerritories.includes(target)) {
                     if (newOwner !== gameState.playerCountry) {
                         newOwnedTerritories = newOwnedTerritories.filter(t => t !== target);
                     }
                 }
+                
+                // Ajouter au nouveau propriétaire
                 if (newOwner === gameState.playerCountry && !newOwnedTerritories.includes(target)) {
                     newOwnedTerritories.push(target);
+                    // Si on annexe une puissance nucléaire, on récupère la bombe
                     if (hasNuclearArsenal(target)) newHasNuclear = true;
+                }
+            } else if (update.type === 'annex_province') {
+                // ANNEXATION PROVINCE (NOUVEAU)
+                const targetFull = update.targetCountry; // Format "Pays:Province"
+                // On ajoute simplement cet ID à la liste des territoires possédés
+                if (!newOwnedTerritories.includes(targetFull)) {
+                     newOwnedTerritories.push(targetFull);
+                     showNotification(`Région annexée: ${targetFull}`);
                 }
             } else if (update.type === 'remove_entity') {
                 newEntities = newEntities.filter(e => e.id !== update.entityId && e.label !== update.label);
@@ -837,7 +852,7 @@ const App: React.FC = () => {
     if (newAiEvents.length > 0 && newAiEvents[0].relatedCountry) {
         cameraTarget = normalizeCountryName(newAiEvents[0].relatedCountry);
     } else if (result.mapUpdates && result.mapUpdates.length > 0) {
-        cameraTarget = normalizeCountryName(result.mapUpdates[0].targetCountry);
+        cameraTarget = normalizeCountryName(result.mapUpdates[0].targetCountry.split(':')[0]); // Handle "Country:Province"
     }
 
     const newHistory = [...fullHistory, playerEvent, ...newAiEvents];
@@ -911,6 +926,7 @@ const App: React.FC = () => {
     let gameOver = false;
     let failReason = null;
 
+    // Check game over only if player lost CORE country. Provinces don't count for game over if lost.
     if (!newOwnedTerritories.includes(gameState.playerCountry)) {
         gameOver = true;
         failReason = "Votre nation a été entièrement annexée. Votre gouvernement est tombé.";
@@ -966,6 +982,20 @@ const App: React.FC = () => {
   };
 
   const handleRegionSelect = (region: string) => {
+    // Si format "Pays:Province", on gère différemment
+    if (region.includes(':')) {
+        const [country, province] = region.split(':');
+        // Si on ne joue pas encore, on sélectionne le pays parent
+        if (!gameState.playerCountry) {
+            setPendingCountry(country);
+            setShowStartModal(true);
+        } else {
+            // Sinon on fait un focus sur le pays
+            setFocusCountry(country);
+        }
+        return;
+    }
+
     if (!gameState.playerCountry) {
         setPendingCountry(region);
         setShowStartModal(true);
@@ -1040,6 +1070,10 @@ const App: React.FC = () => {
           </div>
       </div>
   );
+  
+  // Reste du composant App identique... (La logique d'affichage est inchangée sauf props passées à WorldMap)
+  // Je retourne le bloc complet pour éviter les erreurs de syntaxe, 
+  // mais la majorité du JSX reste identique au fichier précédent.
 
   if (appMode === 'portal_landing') {
       return (
@@ -1169,9 +1203,11 @@ const App: React.FC = () => {
       );
   }
 
+  // Dashboard et Game modes identiques à l'original, sauf intégration de WorldMap props
   if (appMode === 'portal_dashboard') {
-      return (
-          <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
+    // ... (Code Dashboard Identique)
+    return (
+        <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
               {isGlobalLoading && (
                   <div className="fixed inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
                       <GameLogo size="small" theme="light" />
@@ -1353,8 +1389,8 @@ const App: React.FC = () => {
                     <span className="text-emerald-400">✓</span> {notification}
                 </div>
               )}
-          </div>
-      );
+        </div>
+    );
   }
 
   if (appMode === 'game_active') {
@@ -1385,7 +1421,7 @@ const App: React.FC = () => {
             <WorldMap 
                 playerCountry={gameState.playerCountry}
                 ownedTerritories={gameState.ownedTerritories}
-                neutralTerritories={gameState.neutralTerritories} // NEW
+                neutralTerritories={gameState.neutralTerritories} 
                 mapEntities={gameState.mapEntities}
                 onRegionClick={handleRegionSelect}
                 focusCountry={focusCountry}
