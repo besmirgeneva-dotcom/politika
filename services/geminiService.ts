@@ -184,12 +184,14 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 
 // --- SYSTEM INSTRUCTIONS ---
 const SYSTEM_INSTRUCTION = `
-Moteur GeoSim. Règles:
-1. STATS (gt,ec,mi,po,co): Ne touche aux statistiques que si l'action du joueur le justifie explicitement (Ex: Investissement = +eco). Sinon laisse à 0. Le jeu gère l'usure automatique.
-2. CARTE(mu): 'annexation', 'annex_province', 'build_base', 'dissolve'.
-3. INFRA(iu): Civil seulement.
-4. IMPORTANT NUCLÉAIRE: Si le joueur dit "doter de l'arme nucléaire", "lancer programme nucléaire" ou similaire et que tu acceptes, TU DOIS METTRE "nu": true dans le JSON.
-5. FORMAT: JSON minifié uniquement.
+Moteur GeoSim. Simulation Géopolitique.
+RÈGLES CRITIQUES:
+1. NARRATION DYNAMIQUE: Ne te contente pas de confirmer les ordres. Décris les RÉACTIONS du monde. Si le joueur est puissant/nucléaire, ses voisins doivent s'inquiéter, protester ou s'armer.
+2. ÉVÉNEMENTS AUTONOMES: Si le joueur passe son tour ou fait une action mineure, génère des événements mondiaux intéressants (Coups d'état, crises éco, tensions frontalières) sans lien direct avec le joueur pour rendre le monde vivant.
+3. NUCLÉAIRE: Si 'Nuc:OUI' dans le prompt, l'IA doit générer de la tension diplomatique, des sanctions ou de la peur chez les voisins.
+4. CARTE/STATS: Utilise les clés JSON (mu, gt, ec...) uniquement si nécessaire.
+5. FORMAT: JSON minifié valide.
+6. INTERDICTION MESSAGE: Ne jamais générer de message diplomatique (im) venant du pays du joueur. Ne jamais répéter les données techniques (INFRA:...) dans les textes.
 `;
 
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
@@ -234,7 +236,7 @@ export const simulateTurn = async (
 ): Promise<SimulationResponse> => {
   
   const hist = recentHistory.slice(-5).map(e => `[${e.date}]${e.type}:${e.headline}`).join(';');
-  const allContext = alliance ? `ALLIANCE:${alliance.name}` : "";
+  const allContext = alliance ? `ALLIANCE:${alliance.name}` : "Non-aligné";
   
   let territoryStr = ownedTerritories.join(',');
   if (ownedTerritories.length > 8) {
@@ -242,12 +244,21 @@ export const simulateTurn = async (
     territoryStr = `${core} (+${ownedTerritories.length - 3} others)`;
   }
   
+  // Prompt enrichi avec le contexte nucléaire et géographique pour forcer des réactions
   const prompt = `
-    DT:${currentDate}|P:${playerCountry}(Pow:${playerPower})|T:${territoryStr}|C:${chaosLevel}|${allContext}
-    ACT:"${playerAction || "Rien"}"
-    HIST:${hist}
-    INF:${entitiesSummary}
-    DIP:${diplomaticContext}
+    CONTEXTE:
+    Date:${currentDate} | Pays:${playerCountry} | Puissance:${playerPower}
+    Nucléaire:${hasNuclear ? "OUI (Menace)" : "NON"} | Géo:${isLandlocked ? "Enclavé" : "Accès Mer"}
+    Alliances:${allContext} | Chaos:${chaosLevel}
+    Territoires:${territoryStr}
+    
+    ACTION JOUEUR: "${playerAction || "Gestion des affaires courantes (Aucun ordre spécifique)"}"
+    
+    HISTORIQUE: ${hist}
+    INFRA: ${entitiesSummary}
+    DIPLO: ${diplomaticContext}
+    
+    TÂCHE: Simuler le tour. Générer des événements (ev) en réaction au statut du joueur (ex: peur du nucléaire) ou aléatoires (monde vivant).
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
@@ -264,7 +275,7 @@ export const simulateTurn = async (
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: MINIFIED_SCHEMA,
-          temperature: 0.9,
+          temperature: 0.9, // Augmenté pour plus de créativité dans les événements
       });
       return mapMinifiedToFull(JSON.parse(response.text), estimateTokens(prompt, response.text));
   } catch (error) { 

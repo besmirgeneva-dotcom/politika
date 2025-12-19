@@ -860,6 +860,10 @@ const App: React.FC = () => {
         const VALID_SENDER_OVERRIDES = ["ONU", "UN", "UE", "EU", "OTAN", "NATO"];
         result.incomingMessages.forEach(msg => {
             const normalizedSender = normalizeCountryName(msg.sender);
+            
+            // SECURITY CHECK: AI cannot send message as Player (avoids hallucinations like "1 base")
+            if (normalizedSender === gameState.playerCountry) return;
+
             const isValidSender = ALL_COUNTRIES_LIST.includes(normalizedSender) || VALID_SENDER_OVERRIDES.includes(normalizedSender.toUpperCase());
 
             if (isValidSender) {

@@ -262,8 +262,8 @@ const ProvinceLayer = ({
     const [provinceData, setProvinceData] = useState<any>(null);
     const map = useMap();
 
-    // RÈGLE : Affichage à partir du zoom 7
-    const isVisible = zoom >= 7;
+    // RÈGLE : Affichage à partir du zoom 4 (au lieu de 7)
+    const isVisible = zoom >= 4;
 
     useEffect(() => {
         setProvinceData(null);
@@ -283,8 +283,6 @@ const ProvinceLayer = ({
     const style = (feature: any) => {
         const provName = feature.properties.name || feature.properties.NAME_1 || feature.properties.statename;
         const fullId = `${focusCountry}:${provName}`;
-        
-        const isOwned = ownedTerritories.includes(fullId);
         
         let fillColor = "#d1d5db"; // Gris
         if (ownedTerritories.includes(fullId)) fillColor = "#4ade80"; // Vert clair (annexé)
@@ -342,10 +340,26 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
           const name = getFrenchName(feature.properties.name);
           feature.properties.name = name;
           
+          let center: [number, number] | null = null;
+
           if (CAPITAL_DATA[name]) {
-              newCenters.push({ name, center: CAPITAL_DATA[name].coords });
+              center = CAPITAL_DATA[name].coords;
           } else if (LABEL_OVERRIDES[name]) {
-              newCenters.push({ name, center: LABEL_OVERRIDES[name] });
+              center = LABEL_OVERRIDES[name];
+          } else {
+              // Calcul dynamique du centre pour TOUS les pays
+              try {
+                  const layer = L.geoJSON(feature);
+                  const bounds = layer.getBounds();
+                  const latLng = bounds.getCenter();
+                  center = [latLng.lat, latLng.lng];
+              } catch (e) {
+                  console.warn("Could not calculate center for", name);
+              }
+          }
+
+          if (center) {
+              newCenters.push({ name, center });
           }
       });
       setCenters(newCenters);
@@ -413,6 +427,34 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     });
   };
 
+  // --- LOGIC: MARKER POSITIONING ---
+  // Calculates specific position or falls back to country center with jitter
+  const getMarkerPosition = (entity: MapEntity): [number, number] | null => {
+      // 1. If entity has valid coordinates (not 0,0), use them
+      if (entity.lat !== 0 || entity.lng !== 0) {
+          return [entity.lat, entity.lng];
+      }
+      
+      // 2. Fallback: Find country center
+      const countryInfo = centers.find(c => c.name === entity.country);
+      if (countryInfo) {
+          // Generate deterministic pseudo-random jitter based on entity ID
+          // This ensures multiple bases in the same country don't overlap perfectly
+          const seed = entity.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          // Scale jitter by ~1-2 degrees so it stays within most countries but is visible
+          const jitterLat = (Math.sin(seed) * 1.5); 
+          const jitterLng = (Math.cos(seed) * 1.5);
+          
+          return [
+              countryInfo.center[0] + jitterLat, 
+              countryInfo.center[1] + jitterLng
+          ];
+      }
+      
+      // 3. If no center found (rare), hide it
+      return null;
+  };
+
   if (!geoData) return <div className="text-stone-500 text-center mt-20 flex items-center justify-center h-full">Initialisation satellite...</div>;
 
   return (
@@ -450,16 +492,21 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         {/* Capitales */}
         <CapitalMarkers zoom={zoom} />
 
-        {/* Map Entities */}
-        {mapEntities.map((entity) => (
-             <Marker
-                key={entity.id}
-                position={[entity.lat, entity.lng]}
-                icon={createDotIcon(getEntityColor(entity.type), [], entity.type, zoom > 4)}
-             >
-                {zoom > 4 && <Popup>{entity.label || getEntityLabel(entity.type)}</Popup>}
-             </Marker>
-        ))}
+        {/* Map Entities (Bases, Défenses) */}
+        {mapEntities.map((entity) => {
+             const position = getMarkerPosition(entity);
+             if (!position) return null; // Skip if invalid
+             
+             return (
+                <Marker
+                    key={entity.id}
+                    position={position}
+                    icon={createDotIcon(getEntityColor(entity.type), [], entity.type, zoom > 4)}
+                >
+                    {zoom > 4 && <Popup>{entity.label || getEntityLabel(entity.type)}</Popup>}
+                </Marker>
+             );
+        })}
 
     </MapContainer>
   );
