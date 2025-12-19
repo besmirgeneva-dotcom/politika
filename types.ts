@@ -1,5 +1,4 @@
 
-
 export interface GameEvent {
   id: string;
   date: string;
@@ -68,6 +67,7 @@ export interface GameState {
 
 export interface SimulationResponse {
   timeIncrement: 'day' | 'month' | 'year';
+  tokenUsage?: number; // NOUVEAU: Estimation du coût de l'appel
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
     headline: string;
