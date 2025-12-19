@@ -121,6 +121,13 @@ export const AI_NAME_CORRECTIONS: Record<string, string> = {
     "Republic of Kosovo": "Kosovo", // Fix Kosovo
     "Kosovo": "Kosovo",
     "Macedonia": "Macédoine du Nord",
+    "Macédoine": "Macédoine du Nord", // Fix pour Macédoine
+    "North Macedonia": "Macédoine du Nord", // Fix pour nom complet anglais
+    "Republic of Macedonia": "Macédoine du Nord",
+    "The Former Yugoslav Republic of Macedonia": "Macédoine du Nord",
+    "Montenegro": "Monténégro", // Fix pour Montenegro (anglais -> français)
+    "Bosnia": "Bosnie-Herzégovine",
+    "Bosnia and Herzegovina": "Bosnie-Herzégovine",
     "Syria": "Syrie",
     "Lebanon": "Liban"
 };

@@ -43,9 +43,10 @@ export interface GameState {
   gameId: string;
   currentDate: Date;
   playerCountry: string | null;
-  ownedTerritories: string[];
+  ownedTerritories: string[]; // Peut contenir "France" ou "France:Bretagne"
+  neutralTerritories: string[]; // Pays détruits / non revendiqués
   mapEntities: MapEntity[];
-  infrastructure: Record<string, Record<string, number>>; // NOUVEAU: Stockage mémoire des usines/infra par pays
+  infrastructure: Record<string, Record<string, number>>;
   turn: number;
   events: GameEvent[];
   isProcessing: boolean;
@@ -66,6 +67,7 @@ export interface GameState {
 
 export interface SimulationResponse {
   timeIncrement: 'day' | 'month' | 'year';
+  tokenUsage?: number; // Usage estimé des tokens pour cette simulation
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
     headline: string;
@@ -78,9 +80,10 @@ export interface SimulationResponse {
   popularityChange: number;
   corruptionChange: number;
   spaceProgramActive?: boolean;
+  nuclearAcquired?: boolean; // NOUVEAU: L'IA valide l'obtention de la bombe
   // Mises à jour visuelles (Carte)
   mapUpdates?: {
-    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
+    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity' | 'dissolve';
     targetCountry: string;
     newOwner?: string;
     lat?: number;

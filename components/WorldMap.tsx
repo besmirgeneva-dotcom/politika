@@ -1,292 +1,331 @@
-
-import React, { useEffect, useState, useMemo } from 'react';
-import { MapContainer, GeoJSON, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { MapContainer, GeoJSON, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import * as turf from '@turf/turf';
 import { MapEntity, MapEntityType } from '../types';
-import { getFrenchName } from '../constants'; // Importation de la fonction centralisée
+import { getFrenchName } from '../constants';
 
-// --- CUSTOM DOT MARKERS ---
+// --- ALGORITHME POINT-IN-POLYGON (Ray Casting) ---
+const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
+    const x = point[0], y = point[1];
+    let inside = false;
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i][0], yi = vs[i][1];
+        const xj = vs[j][0], yj = vs[j][1];
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+};
+
+const isPointInFeature = (point: [number, number], feature: any): boolean => {
+    const geometry = feature.geometry;
+    if (!geometry) return false;
+    
+    if (geometry.type === 'Polygon') {
+        const polygon = geometry.coordinates[0].map((p: number[]) => [p[1], p[0]] as [number, number]);
+        return isPointInPolygon(point, polygon);
+    } else if (geometry.type === 'MultiPolygon') {
+        for (const poly of geometry.coordinates) {
+            const polygon = poly[0].map((p: number[]) => [p[1], p[0]] as [number, number]);
+            if (isPointInPolygon(point, polygon)) return true;
+        }
+    }
+    return false;
+};
+
+// Algorithme pour trouver un point visuel intérieur par échantillonnage (Fallback ultime)
+const findVisualCenter = (feature: any): [number, number] | null => {
+    try {
+        const layer = L.geoJSON(feature);
+        const bounds = layer.getBounds();
+        const southWest = bounds.getSouthWest();
+        const northEast = bounds.getNorthEast();
+        
+        // 1. Essayer le centre géométrique
+        const center = bounds.getCenter();
+        if (isPointInFeature([center.lat, center.lng], feature)) {
+            return [center.lat, center.lng];
+        }
+
+        // 2. Si échec, échantillonnage aléatoire (50 essais)
+        for (let i = 0; i < 50; i++) {
+            const lat = southWest.lat + Math.random() * (northEast.lat - southWest.lat);
+            const lng = southWest.lng + Math.random() * (northEast.lng - southWest.lng);
+            if (isPointInFeature([lat, lng], feature)) {
+                return [lat, lng];
+            }
+        }
+        
+        // 3. Retourner le centre géométrique même si imparfait (mieux que rien)
+        return [center.lat, center.lng];
+    } catch (e) {
+        return null;
+    }
+};
+
+// --- CUSTOM MARKERS ---
 const createDotIcon = (color: string, labels: string[], type: string, showLabel: boolean) => {
-  // Logic for list display if multiple labels
   const labelHtml = labels.length > 0 ? labels.map(l => `<div>${l}</div>`).join('') : getEntityLabel(type as MapEntityType);
 
   return L.divIcon({
     className: 'custom-dot-marker',
     html: `
       <div style="position: relative; width: 0; height: 0;">
-        <!-- The Dot -->
         <div style="
           position: absolute;
-          left: -5px; top: -5px;
-          width: 12px; height: 12px; 
+          left: -4px; top: -4px;
+          width: 8px; height: 8px; 
           background-color: ${color}; 
           border-radius: 50%; 
-          border: 2px solid white; 
-          box-shadow: 0 1px 3px rgba(0,0,0,0.6);
+          border: 1.5px solid white; 
+          box-shadow: 0 1px 2px rgba(0,0,0,0.8);
         "></div>
         
-        <!-- The Label (Conditional) -->
         ${showLabel ? `
         <div style="
           position: absolute; 
-          left: 10px; top: -8px; 
+          left: 10px; top: -6px; 
           white-space: nowrap; 
-          font-size: 8px; /* REDUIT DE 2PX */
+          font-size: 10px;
           font-weight: bold; 
-          background-color: rgba(0,0,0,0.85); 
           color: white; 
-          padding: 3px 6px; 
-          border-radius: 4px;
+          text-shadow: 0px 0px 3px black, 0px 0px 5px black;
           pointer-events: none;
-          text-shadow: 0 0 2px black;
           z-index: 10;
-          border: 1px solid ${color};
           display: flex;
           flex-direction: column;
-          gap: 1px;
         ">${labelHtml}</div>
         ` : ''}
       </div>
     `,
-    iconSize: [0, 0], // Logic handled in HTML
+    iconSize: [0, 0],
     iconAnchor: [0, 0]
   });
 };
 
 const getEntityLabel = (type: MapEntityType) => {
     switch(type) {
-        case 'military_base': return '🏰 Base Militaire';
-        case 'defense_system': return '🛡️ Défense';
-        default: return type;
+        case 'military_base': return 'Base';
+        case 'defense_system': return 'Défense';
+        default: return 'Site';
     }
 }
 
-// Color mapping for entity types
 const getEntityColor = (type: MapEntityType) => {
     switch(type) {
-        case 'military_base': return '#6366f1'; // Indigo for Bases (Main)
-        case 'defense_system': return '#10b981'; // Emerald for Defense
+        case 'military_base': return '#3b82f6';
+        case 'defense_system': return '#f97316';
         default: return '#64748b';
     }
 };
 
-// --- DATASET: CAPITAL DATA ---
-interface CapitalInfo {
-    coords: [number, number];
-    city: string;
-}
+const ALL_CAPITALS_URL = "https://raw.githubusercontent.com/hyperknot/country-capitals/master/data/country-capitals.json";
 
-const CAPITAL_DATA: Record<string, CapitalInfo> = {
-    // Amerique du Nord & Centrale
-    "États-Unis": { coords: [38.9072, -77.0369], city: "Washington D.C." },
-    "Canada": { coords: [45.4215, -75.6972], city: "Ottawa" },
-    "Mexique": { coords: [19.4326, -99.1332], city: "Mexico" },
-    "Cuba": { coords: [23.1136, -82.3666], city: "La Havane" },
-    "Guatemala": { coords: [14.6349, -90.5069], city: "Guatemala" },
-    "Honduras": { coords: [14.0723, -87.1921], city: "Tegucigalpa" },
-    "Nicaragua": { coords: [12.1150, -86.2362], city: "Managua" },
-    "Costa Rica": { coords: [9.9281, -84.0907], city: "San José" },
-    "Panama": { coords: [8.9824, -79.5199], city: "Panama" },
-    "Haïti": { coords: [18.5392, -72.3350], city: "Port-au-Prince" },
-    "République dominicaine": { coords: [18.4861, -69.9312], city: "Saint-Domingue" },
-    "Jamaïque": { coords: [17.9712, -76.7928], city: "Kingston" },
-
-    // Amerique du Sud
-    "Brésil": { coords: [-15.8267, -47.9218], city: "Brasília" },
-    "Argentine": { coords: [-34.6037, -58.3816], city: "Buenos Aires" },
-    "Colombie": { coords: [4.7110, -74.0721], city: "Bogota" },
-    "Pérou": { coords: [-12.0464, -77.0428], city: "Lima" },
-    "Chili": { coords: [-33.4489, -70.6693], city: "Santiago" },
-    "Venezuela": { coords: [10.4806, -66.9036], city: "Caracas" },
-    "Équateur": { coords: [-0.1807, -78.4678], city: "Quito" },
-    "Bolivie": { coords: [-16.5000, -68.1500], city: "La Paz" },
-    "Paraguay": { coords: [-25.2637, -57.5759], city: "Asunción" },
-    "Uruguay": { coords: [-34.9011, -56.1645], city: "Montevideo" },
-    "Guyana": { coords: [6.8013, -58.1551], city: "Georgetown" },
-    "Suriname": { coords: [5.8520, -55.2038], city: "Paramaribo" },
-
-    // Europe
-    "France": { coords: [48.8566, 2.3522], city: "Paris" },
-    "Royaume-Uni": { coords: [51.5074, -0.1278], city: "Londres" },
-    "Allemagne": { coords: [52.5200, 13.4050], city: "Berlin" },
-    "Italie": { coords: [41.9028, 12.4964], city: "Rome" },
-    "Espagne": { coords: [40.4168, -3.7038], city: "Madrid" },
-    "Portugal": { coords: [38.7223, -9.1393], city: "Lisbonne" },
-    "Pays-Bas": { coords: [52.3676, 4.9041], city: "Amsterdam" },
-    "Belgique": { coords: [50.8503, 4.3517], city: "Bruxelles" },
-    "Suisse": { coords: [46.9480, 7.4474], city: "Berne" },
-    "Autriche": { coords: [48.2082, 16.3738], city: "Vienne" },
-    "Pologne": { coords: [52.2297, 21.0122], city: "Varsovie" },
-    "Tchéquie": { coords: [50.0755, 14.4378], city: "Prague" },
-    "Slovaquie": { coords: [48.1486, 17.1077], city: "Bratislava" },
-    "Hongrie": { coords: [47.4979, 19.0402], city: "Budapest" },
-    "Roumanie": { coords: [44.4268, 26.1025], city: "Bucarest" },
-    "Bulgarie": { coords: [42.6977, 23.3219], city: "Sofia" },
-    "Grèce": { coords: [37.9838, 23.7275], city: "Athènes" },
-    "Serbie": { coords: [44.7866, 20.4489], city: "Belgrade" },
-    "Croatie": { coords: [45.8150, 15.9819], city: "Zagreb" },
-    "Bosnie-Herzégovine": { coords: [43.8563, 18.4131], city: "Sarajevo" },
-    "Suède": { coords: [59.3293, 18.0686], city: "Stockholm" },
-    "Norvège": { coords: [59.9139, 10.7522], city: "Oslo" },
-    "Finlande": { coords: [60.1699, 24.9384], city: "Helsinki" },
-    "Danemark": { coords: [55.6761, 12.5683], city: "Copenhague" },
-    "Irlande": { coords: [53.3498, -6.2603], city: "Dublin" },
-    "Islande": { coords: [64.1265, -21.8174], city: "Reykjavik" },
-    "Ukraine": { coords: [50.4501, 30.5234], city: "Kiev" },
-    "Biélorussie": { coords: [53.9045, 27.5615], city: "Minsk" },
-    "Moldavie": { coords: [47.0105, 28.8638], city: "Chisinau" },
-    "Albanie": { coords: [41.3275, 19.8187], city: "Tirana" },
-    "Macédoine du Nord": { coords: [41.9981, 21.4254], city: "Skopje" },
-    "Monténégro": { coords: [42.4304, 19.2594], city: "Podgorica" },
-    "Slovénie": { coords: [46.0569, 14.5058], city: "Ljubljana" },
-    "Estonie": { coords: [59.4370, 24.7536], city: "Tallinn" },
-    "Lettonie": { coords: [56.9496, 24.1052], city: "Riga" },
-    "Lituanie": { coords: [54.6872, 25.2797], city: "Vilnius" },
-
-    // Russie & Asie Centrale
-    "Russie": { coords: [55.7558, 37.6173], city: "Moscou" },
-    "Kazakhstan": { coords: [51.1694, 71.4491], city: "Astana" },
-    "Ouzbékistan": { coords: [41.2995, 69.2401], city: "Tachkent" },
-    "Turkménistan": { coords: [37.9601, 58.3261], city: "Achgabat" },
-    "Kirghizistan": { coords: [42.8746, 74.5698], city: "Bichkek" },
-    "Tadjikistan": { coords: [38.5598, 68.7870], city: "Douchanbé" },
-    "Mongolie": { coords: [47.9181, 106.9173], city: "Oulan-Bator" },
-
-    // Asie
-    "Chine": { coords: [39.9042, 116.4074], city: "Pékin" },
-    "Japon": { coords: [35.6762, 139.6503], city: "Tokyo" },
-    "Inde": { coords: [28.6139, 77.2090], city: "New Delhi" },
-    "Corée du Sud": { coords: [37.5665, 126.9780], city: "Séoul" },
-    "Corée du Nord": { coords: [39.0392, 125.7625], city: "Pyongyang" },
-    "Vietnam": { coords: [21.0285, 105.8542], city: "Hanoï" },
-    "Thaïlande": { coords: [13.7563, 100.5018], city: "Bangkok" },
-    "Indonésie": { coords: [-6.2088, 106.8456], city: "Jakarta" },
-    "Pakistan": { coords: [33.6844, 73.0479], city: "Islamabad" },
-    "Afghanistan": { coords: [34.5553, 69.2075], city: "Kaboul" },
-    "Iran": { coords: [35.6892, 51.3890], city: "Téhéran" },
-    "Irak": { coords: [33.3152, 44.3661], city: "Bagdad" },
-    "Turquie": { coords: [39.9334, 32.8597], city: "Ankara" },
-    "Syrie": { coords: [33.5138, 36.2765], city: "Damas" },
-    "Liban": { coords: [33.8886, 35.4955], city: "Beyrouth" },
-    "Israël": { coords: [31.7683, 35.2137], city: "Jérusalem" },
-    "Jordanie": { coords: [31.9454, 35.9284], city: "Amman" },
-    "Arabie saoudite": { coords: [24.7136, 46.6753], city: "Riyad" },
-    "Émirats arabes unis": { coords: [24.4539, 54.3773], city: "Abou Dabi" },
-    "Qatar": { coords: [25.2854, 51.5310], city: "Doha" },
-    "Koweït": { coords: [29.3759, 47.9774], city: "Koweït" },
-    "Oman": { coords: [23.5880, 58.3829], city: "Mascate" },
-    "Yémen": { coords: [15.3694, 44.1910], city: "Sanaa" },
-    "Malaisie": { coords: [3.1390, 101.6869], city: "Kuala Lumpur" },
-    "Singapour": { coords: [1.3521, 103.8198], city: "Singapour" },
-    "Philippines": { coords: [14.5995, 120.9842], city: "Manille" },
-    "Birmanie": { coords: [19.7633, 96.0785], city: "Naypyidaw" },
-    "Cambodge": { coords: [11.5564, 104.9282], city: "Phnom Penh" },
-    "Laos": { coords: [17.9757, 102.6331], city: "Vientiane" },
-    "Bangladesh": { coords: [23.8103, 90.4125], city: "Dacca" },
-    "Népal": { coords: [27.7172, 85.3240], city: "Katmandou" },
-    "Sri Lanka": { coords: [6.9271, 79.8612], city: "Colombo" },
-    "Taïwan": { coords: [25.0330, 121.5654], city: "Taipei" },
-
-    // Afrique
-    "Égypte": { coords: [30.0444, 31.2357], city: "Le Caire" },
-    "Afrique du Sud": { coords: [-25.7479, 28.2293], city: "Pretoria" },
-    "Nigéria": { coords: [9.0765, 7.3986], city: "Abuja" },
-    "Maroc": { coords: [34.0209, -6.8416], city: "Rabat" },
-    "Algérie": { coords: [36.7372, 3.0863], city: "Alger" },
-    "Tunisie": { coords: [36.8065, 10.1815], city: "Tunis" },
-    "Libye": { coords: [32.8872, 13.1913], city: "Tripoli" },
-    "Soudan": { coords: [15.5007, 32.5599], city: "Khartoum" },
-    "Éthiopie": { coords: [9.0192, 38.7525], city: "Addis-Abeba" },
-    "Kenya": { coords: [-1.2921, 36.8219], city: "Nairobi" },
-    "République démocratique du Congo": { coords: [-4.4419, 15.2663], city: "Kinshasa" },
-    "Tanzanie": { coords: [-6.1629, 35.7423], city: "Dodoma" },
-    "Ouganda": { coords: [0.3476, 32.5825], city: "Kampala" },
-    "Ghana": { coords: [5.6037, -0.1870], city: "Accra" },
-    "Côte d'Ivoire": { coords: [6.8276, -5.2577], city: "Yamoussoukro" },
-    "Sénégal": { coords: [14.7167, -17.4677], city: "Dakar" },
-    "Cameroun": { coords: [3.8480, 11.5021], city: "Yaoundé" },
-    "Angola": { coords: [-8.8390, 13.2894], city: "Luanda" },
-    "Madagascar": { coords: [-18.8792, 47.5079], city: "Antananarivo" },
-    "Mali": { coords: [12.6392, -8.0029], city: "Bamako" },
-    "Niger": { coords: [13.5116, 2.1254], city: "Niamey" },
-    "Tchad": { coords: [12.1348, 15.0557], city: "N'Djaména" },
-    "Burkina Faso": { coords: [12.3714, -1.5197], city: "Ouagadougou" },
-    "Zimbabwe": { coords: [-17.8216, 31.0492], city: "Harare" },
-    "Zambie": { coords: [-15.3875, 28.3228], city: "Lusaka" },
-
-    // Océanie
-    "Australie": { coords: [-35.2809, 149.1300], city: "Canberra" },
-    "Nouvelle-Zélande": { coords: [-41.2865, 174.7762], city: "Wellington" },
-    "Papouasie-Nouvelle-Guinée": { coords: [-9.4438, 147.1803], city: "Port Moresby" },
-    "Fidji": { coords: [-18.1248, 178.4501], city: "Suva" }
-};
-
+// --- LABEL OVERRIDES (180+ PAYS POUR COUVERTURE TOTALE) ---
 const LABEL_OVERRIDES: Record<string, [number, number]> = {
-    "Croatie": [44.6, 15.6], "Norvège": [62.5, 9.0], "Vietnam": [16.0, 107.5], 
-    "Chili": [-32.0, -71.0], "Japon": [36.0, 138.0], "Israël": [31.3, 35.0],
-    "Italie": [42.5, 12.8], "États-Unis": [39.5, -98.5], "France": [46.5, 2.5],
-    "Indonésie": [-4.0, 115.0], "Philippines": [13.0, 122.0], "Grèce": [39.0, 22.0],
-    "Canada": [56.0, -100.0], "Russie": [60.0, 95.0]
+    // --- AMÉRIQUE DU NORD & CARAÏBES ---
+    "Canada": [56.0, -106.0], "États-Unis": [39.0, -98.0], "Mexique": [23.5, -102.0],
+    "Guatemala": [15.5, -90.2], "Belize": [17.0, -88.5], "Salvador": [13.7, -88.9],
+    "Honduras": [14.8, -86.5], "Nicaragua": [12.8, -85.0], "Costa Rica": [10.0, -84.0],
+    "Panama": [8.5, -80.0], "Cuba": [21.5, -79.0], "Haïti": [19.0, -72.5],
+    "République dominicaine": [19.0, -70.0], "Jamaïque": [18.1, -77.3],
+    "Bahamas": [24.0, -76.0], "Trinité-et-Tobago": [10.4, -61.2],
+
+    // --- AMÉRIQUE DU SUD ---
+    "Colombie": [4.0, -73.0], "Venezuela": [7.0, -66.0], "Guyana": [5.0, -59.0],
+    "Suriname": [4.0, -56.0], "Équateur": [-1.5, -78.0], "Pérou": [-9.0, -75.0],
+    "Brésil": [-12.0, -53.0], "Bolivie": [-17.0, -64.0], "Paraguay": [-23.5, -58.0],
+    "Chili": [-32.0, -71.0], "Argentine": [-36.0, -65.0], "Uruguay": [-33.0, -56.0],
+
+    // --- EUROPE ---
+    "Islande": [65.0, -19.0], "Norvège": [62.0, 9.0], "Suède": [62.0, 15.0], "Finlande": [64.0, 26.0],
+    "Royaume-Uni": [54.0, -2.5], "Irlande": [53.2, -8.0], "Danemark": [56.0, 10.0],
+    "Pays-Bas": [52.2, 5.5], "Belgique": [50.6, 4.6], "Allemagne": [51.0, 10.0],
+    "Pologne": [52.0, 19.0], "France": [46.8, 2.5], "Suisse": [46.8, 8.2],
+    "Autriche": [47.5, 14.0], "Tchéquie": [49.8, 15.5], "Slovaquie": [48.7, 19.5],
+    "Hongrie": [47.2, 19.3], "Espagne": [40.0, -3.5], "Portugal": [39.5, -8.0],
+    "Italie": [42.5, 12.8], "Slovénie": [46.1, 15.0], "Croatie": [45.1, 16.5],
+    "Bosnie-Herzégovine": [44.2, 17.8], "Serbie": [44.2, 20.8], "Monténégro": [42.7, 19.3],
+    "Kosovo": [42.6, 20.9], "Albanie": [41.1, 20.0], "Macédoine du Nord": [41.6, 21.7],
+    "Grèce": [39.5, 22.0], "Bulgarie": [42.7, 25.2], "Roumanie": [46.0, 25.0],
+    "Moldavie": [47.2, 28.5], "Ukraine": [49.0, 31.0], "Biélorussie": [53.5, 28.0],
+    "Lituanie": [55.3, 24.0], "Lettonie": [56.9, 26.0], "Estonie": [58.8, 25.5],
+    "Russie": [58.0, 80.0], "Luxembourg": [49.8, 6.1], "Chypre": [35.1, 33.4],
+
+    // --- AFRIQUE ---
+    "Maroc": [31.0, -6.0], "Algérie": [28.0, 2.5], "Tunisie": [34.5, 9.5],
+    "Libye": [27.0, 17.0], "Égypte": [26.5, 30.0], "Mauritanie": [20.0, -10.0],
+    "Mali": [17.5, -3.0], "Niger": [17.0, 9.0], "Tchad": [15.5, 18.5],
+    "Soudan": [14.0, 30.0], "Soudan du Sud": [7.0, 30.0], "Érythrée": [15.5, 38.5],
+    "Éthiopie": [8.5, 39.5], "Somalie": [5.0, 46.0], "Djibouti": [11.7, 42.5],
+    "Sénégal": [14.5, -14.5], "Gambie": [13.4, -15.5], "Guinée-Bissau": [12.0, -15.0],
+    "Guinée": [10.5, -11.0], "Sierra Leone": [8.5, -11.8], "Liberia": [6.5, -9.5],
+    "Côte d'Ivoire": [7.5, -5.5], "Ghana": [7.8, -1.0], "Burkina Faso": [12.2, -1.7],
+    "Togo": [8.5, 1.1], "Bénin": [9.5, 2.3], "Nigéria": [9.5, 8.0],
+    "Cameroun": [5.5, 12.5], "République centrafricaine": [6.5, 20.5],
+    "Guinée équatoriale": [1.6, 10.5], "Gabon": [-0.5, 11.5], "Congo": [-1.0, 15.5],
+    "République démocratique du Congo": [-3.0, 23.5], "Ouganda": [1.2, 32.2],
+    "Kenya": [0.5, 38.0], "Tanzanie": [-6.0, 35.0], "Rwanda": [-2.0, 30.0], "Burundi": [-3.4, 30.0],
+    "Angola": [-12.0, 17.5], "Zambie": [-13.5, 28.0], "Malawi": [-13.5, 34.0],
+    "Mozambique": [-18.5, 35.0], "Zimbabwe": [-19.0, 29.8], "Botswana": [-22.0, 24.0],
+    "Namibie": [-22.0, 17.0], "Afrique du Sud": [-29.0, 25.0], "Lesotho": [-29.5, 28.2],
+    "Eswatini": [-26.5, 31.5], "Madagascar": [-19.0, 46.5],
+
+    // --- MOYEN-ORIENT & ASIE CENTRALE ---
+    "Turquie": [39.0, 35.0], "Syrie": [35.0, 38.5], "Liban": [33.9, 35.8],
+    "Israël": [31.4, 35.0], "Palestine": [31.9, 35.3], "Jordanie": [31.0, 36.5],
+    "Irak": [33.0, 43.5], "Koweït": [29.3, 47.6], "Arabie saoudite": [24.0, 45.0],
+    "Bahreïn": [26.0, 50.5], "Qatar": [25.3, 51.2], "Émirats arabes unis": [23.8, 54.0],
+    "Oman": [21.0, 57.0], "Yémen": [15.5, 48.0], "Iran": [32.5, 54.0],
+    "Afghanistan": [34.0, 66.0], "Pakistan": [30.0, 70.0], "Turkménistan": [39.0, 59.5],
+    "Ouzbékistan": [41.5, 64.0], "Kazakhstan": [48.0, 67.0], "Kirghizistan": [41.5, 74.5],
+    "Tadjikistan": [38.5, 71.0], "Azerbaïdjan": [40.4, 47.5], "Arménie": [40.2, 45.0], "Géorgie": [42.0, 43.5],
+
+    // --- ASIE DU SUD & EST ---
+    "Inde": [22.0, 78.0], "Sri Lanka": [7.8, 80.7], "Népal": [28.2, 84.0], "Bhoutan": [27.5, 90.5],
+    "Bangladesh": [24.0, 90.2], "Birmanie": [21.0, 96.0], "Thaïlande": [15.0, 101.0],
+    "Laos": [19.0, 102.5], "Cambodge": [12.5, 105.0], "Vietnam": [16.5, 108.0],
+    "Chine": [35.5, 104.0], "Mongolie": [46.8, 103.5], "Corée du Nord": [40.0, 127.0],
+    "Corée du Sud": [36.3, 127.8], "Japon": [36.5, 138.0], "Taïwan": [23.7, 121.0],
+    "Philippines": [12.0, 123.0], "Malaisie": [4.0, 102.0], "Singapour": [1.35, 103.8],
+    "Brunei": [4.5, 114.7], "Indonésie": [-4.0, 118.0], "Timor oriental": [-8.8, 125.6],
+
+    // --- OCÉANIE ---
+    "Australie": [-25.0, 134.0], "Papouasie-Nouvelle-Guinée": [-6.0, 144.0],
+    "Nouvelle-Zélande": [-41.0, 173.0], "Fidji": [-17.8, 178.0], "Îles Salomon": [-9.6, 160.0],
+    "Vanuatu": [-15.4, 166.9], "Nouvelle-Calédonie": [-21.3, 165.5]
 };
 
-// --- COMPONENT: LABEL RENDERER ---
-const MapLabels = ({ zoom, visibleCountries, ownedTerritories, playerCountry }: { zoom: number, visibleCountries: any[], ownedTerritories: string[], playerCountry: string | null }) => {
-    if (zoom < 3) return null;
+// --- MAP LABELS COMPONENT ---
+const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, neutralTerritories }: { zoom: number, visibleCountries: any[], playerCountry: string | null, ownedTerritories: string[], neutralTerritories: string[] }) => {
+    // Définition de "Grand Pays"
+    const MAJOR_POWERS = ["États-Unis", "Russie", "Chine", "Brésil", "Australie", "Canada", "Inde", "Algérie", "Congo", "Argentine"];
 
     return (
         <>
             {visibleCountries.map((c, idx) => {
                 const name = c.name;
-                if (ownedTerritories.includes(name) && name !== playerCountry) return null;
-
-                const center = LABEL_OVERRIDES[name] || c.center;
-                const capitalInfo = CAPITAL_DATA[name];
-                // Afficher plus de capitales: Si zoom >= 5 pour tout le monde, ou zoom >= 4 pour pays importants
-                const isCapitalVisible = capitalInfo && zoom >= 4;
-                
+                const center = c.center; // Center is now guaranteed inside
                 if (!center) return null;
 
+                const isPlayer = name === playerCountry;
+                const isOwned = ownedTerritories.includes(name);
+                const isNeutral = neutralTerritories.includes(name);
+                
+                // MASQUAGE DU NOM SI ANNEXÉ MAIS PAS LE COEUR DU PAYS JOUEUR
+                // C'est ici que le nom du pays disparait lors d'une annexion, laissant la place à la capitale (via CapitalMarkers)
+                if (isOwned && !isPlayer) return null;
+
+                const displayName = isNeutral ? "PAYS VIDE" : name;
+                const displayColor = isNeutral ? '#b91c1c' : (isPlayer ? '#15803d' : '#374151');
+                
+                const isMajor = MAJOR_POWERS.includes(name);
+
+                // LOGIQUE D'AFFICHAGE (Zoom)
+                if (zoom < 3 && !isMajor) return null; 
+
+                const fontSize = zoom < 4 ? '9px' : '11px';
+                
                 return (
-                    <React.Fragment key={`label-${name}-${idx}`}>
-                        <Marker 
-                            position={center} 
-                            zIndexOffset={100}
-                            icon={L.divIcon({
-                                className: 'bg-transparent',
-                                html: `<div style="
-                                    color: rgba(255,255,255,0.9); 
-                                    text-shadow: 1px 1px 1px black; 
-                                    font-weight: bold; 
-                                    font-size: ${zoom < 4 ? '10px' : '13px'};
-                                    text-transform: uppercase;
-                                    text-align: center;
-                                    width: 200px;
-                                    margin-left: -100px;
-                                    pointer-events: none;
-                                    letter-spacing: 1px;
-                                    font-family: sans-serif;
-                                ">${name}</div>`
-                            })}
-                        />
-                        {isCapitalVisible && (
-                             <Marker 
-                                position={capitalInfo.coords}
-                                zIndexOffset={1000}
-                                icon={L.divIcon({
-                                    className: 'bg-transparent',
-                                    html: `<div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
-                                        <div style="width: 5px; height: 5px; background: black; border: 1px solid white; border-radius: 50%; box-shadow: 0 0 2px black;"></div>
-                                        <div style="color: #fcd34d; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000; font-size: 8px; font-weight: bold; margin-top: 1px; white-space: nowrap;">${capitalInfo.city}</div>
-                                    </div>`
-                                })}
-                            />
-                        )}
-                    </React.Fragment>
+                    <Marker 
+                        key={`label-${name}-${idx}`}
+                        position={center} 
+                        zIndexOffset={900}
+                        icon={L.divIcon({
+                            className: 'bg-transparent',
+                            html: `<div style="
+                                color: ${displayColor};
+                                text-shadow: 0 0 3px rgba(255,255,255,0.9); 
+                                font-weight: ${isPlayer || isNeutral ? '900' : 'bold'}; 
+                                font-size: ${fontSize};
+                                text-transform: uppercase;
+                                text-align: center;
+                                width: 160px;
+                                margin-left: -80px;
+                                pointer-events: none;
+                                font-family: 'Segoe UI', sans-serif;
+                                opacity: 0.95;
+                                letter-spacing: 0.5px;
+                            ">${displayName}</div>`
+                        })}
+                    />
                 );
             })}
         </>
     );
 };
+
+const CapitalMarkers = ({ zoom, ownedTerritories, playerCountry }: { zoom: number, ownedTerritories: string[], playerCountry: string | null }) => {
+    const [capitals, setCapitals] = useState<any[]>([]);
+
+    useEffect(() => {
+        const fetchCapitals = async () => {
+            try {
+                const res = await fetch(ALL_CAPITALS_URL);
+                if (!res.ok) throw new Error("Failed to fetch capitals");
+                const data = await res.json();
+                
+                const formatted = data
+                    .filter((item: any) => item.CapitalLatitude && item.CapitalLongitude)
+                    .map((item: any) => ({
+                        country: getFrenchName(item.CountryName),
+                        city: item.CapitalName,
+                        coords: [parseFloat(item.CapitalLatitude), parseFloat(item.CapitalLongitude)]
+                    }));
+                
+                setCapitals(formatted);
+            } catch (e) {
+                console.warn("Erreur chargement capitales", e);
+            }
+        };
+        fetchCapitals();
+    }, []);
+
+    // Affichage amélioré :
+    // On affiche les capitales à partir de zoom 4 en général.
+    // MAIS, si c'est un territoire annexé (appartient au joueur mais n'est pas son pays d'origine),
+    // on l'affiche même à zoom 3 pour servir d'étiquette principale (puisque le nom du pays est masqué).
+    
+    if (zoom < 3) return null;
+
+    return (
+        <>
+            {capitals.map((info, idx) => {
+                const isAnnexed = playerCountry && ownedTerritories.includes(info.country) && info.country !== playerCountry;
+                
+                // Si zoom < 4, on n'affiche QUE les capitales des territoires annexés pour qu'ils aient une étiquette
+                if (zoom < 4 && !isAnnexed) return null;
+
+                return (
+                    <Marker 
+                        key={`cap-${info.country}-${idx}`}
+                        position={info.coords}
+                        zIndexOffset={1000}
+                        icon={L.divIcon({
+                            className: 'bg-transparent',
+                            html: `<div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+                                <div style="width: ${isAnnexed ? '6px' : '5px'}; height: ${isAnnexed ? '6px' : '5px'}; background: ${isAnnexed ? '#15803d' : '#1f2937'}; border: 1px solid white; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.5);"></div>
+                                ${zoom > 4 || isAnnexed ? `
+                                <div style="
+                                    color: ${isAnnexed ? '#064e3b' : '#4b5563'}; 
+                                    text-shadow: 1px 1px 0 rgba(255,255,255,0.9); 
+                                    font-size: ${isAnnexed ? '10px' : '8px'}; 
+                                    font-weight: ${isAnnexed ? 'bold' : 'normal'};
+                                    margin-top: 1px; 
+                                    white-space: nowrap; 
+                                    background: rgba(255,255,255,0.6); 
+                                    padding: 0 2px; 
+                                    border-radius: 2px;
+                                ">${info.city}</div>` : ''}
+                            </div>`
+                        })}
+                    />
+                );
+            })}
+        </>
+    );
+}
 
 const MapController = ({ onZoomChange }: { onZoomChange: (z: number) => void }) => {
     const map = useMapEvents({
@@ -299,17 +338,10 @@ const FlyToCountry = ({ targetCountry, centers }: { targetCountry: string | null
     const map = useMap();
     useEffect(() => {
         if (targetCountry) {
-            if (LABEL_OVERRIDES[targetCountry]) {
-                map.flyTo(LABEL_OVERRIDES[targetCountry], 5, { duration: 2 });
-                return;
-            }
-            const centerObj = centers.find(c => c.name === targetCountry);
+            const countryName = targetCountry.split(':')[0];
+            const centerObj = centers.find(c => c.name === countryName);
             if (centerObj) {
-                map.flyTo(centerObj.center, 5, { duration: 2 });
-                return;
-            }
-            if (CAPITAL_DATA[targetCountry]) {
-                map.flyTo(CAPITAL_DATA[targetCountry].coords, 5, { duration: 2 });
+                map.flyTo(centerObj.center, 5, { duration: 1.5 });
             }
         }
     }, [targetCountry, centers, map]);
@@ -320,16 +352,43 @@ interface WorldMapProps {
   onRegionClick: (region: string) => void;
   playerCountry: string | null;
   ownedTerritories: string[];
+  neutralTerritories?: string[];
   mapEntities: MapEntity[];
   focusCountry: string | null;
 }
 
 const CACHE_KEY = 'GEOSIM_MAP_DATA';
+const GEOJSON_URL = "https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson";
 
-const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, mapEntities, focusCountry }) => {
+const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, neutralTerritories = [], mapEntities, focusCountry }) => {
   const [geoData, setGeoData] = useState<any>(null);
   const [zoom, setZoom] = useState(3);
   const [centers, setCenters] = useState<{name: string, center: [number, number]}[]>([]);
+  const featureMap = useRef<Record<string, any>>({});
+
+  // 1. Load Data
+  const processGeoData = (data: any) => {
+      const newCenters: {name: string, center: [number, number]}[] = [];
+      
+      data.features.forEach((feature: any) => {
+          const name = getFrenchName(feature.properties.name);
+          feature.properties.name = name;
+          featureMap.current[name] = feature;
+          
+          let center: [number, number] | null = null;
+          if (LABEL_OVERRIDES[name]) {
+              center = LABEL_OVERRIDES[name];
+          } else {
+              center = findVisualCenter(feature);
+          }
+
+          if (center) {
+              newCenters.push({ name, center });
+          }
+      });
+      setCenters(newCenters);
+      setGeoData(data);
+  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -343,144 +402,194 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
                 localStorage.removeItem(CACHE_KEY);
             }
         }
-
         try {
-            const response = await fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json');
-            if (!response.ok) throw new Error('Network response was not ok');
+            const response = await fetch(GEOJSON_URL);
             const data = await response.json();
-            try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) {}
+            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
             processGeoData(data);
-        } catch (err) {
-            console.error("Failed to load map data", err);
+        } catch (error) {
+            console.error("Failed to load map data", error);
         }
     };
     loadData();
   }, []);
 
-  const processGeoData = (data: any) => {
-        setGeoData(data);
-        const newCenters: {name: string, center: [number, number]}[] = [];
-        data.features.forEach((f: any) => {
-                const frenchName = getFrenchName(f.properties.name);
-                let bestCenter: [number, number] | null = null;
-                const geometry = f.geometry;
-                if (geometry.type === "Polygon") {
-                    // @ts-ignore
-                    const layer = L.polygon(geometry.coordinates.map(ring => ring.map(c => [c[1], c[0]])));
-                    bestCenter = [layer.getBounds().getCenter().lat, layer.getBounds().getCenter().lng];
-                } else if (geometry.type === "MultiPolygon") {
-                    let maxArea = 0;
-                    geometry.coordinates.forEach((polyCoords: any[]) => {
-                        const latLngs = polyCoords[0].map((c: number[]) => [c[1], c[0]]);
-                        const layer = L.polygon(latLngs);
-                        const bounds = layer.getBounds();
-                        const area = (bounds.getEast() - bounds.getWest()) * (bounds.getNorth() - bounds.getSouth());
-                        if (area > maxArea) {
-                            maxArea = area;
-                            bestCenter = [bounds.getCenter().lat, bounds.getCenter().lng];
-                        }
-                    });
-                }
-                if (bestCenter) newCenters.push({ name: frenchName, center: bestCenter });
-        });
-        setCenters(newCenters);
-  };
+  // 2. Compute Merged Geometry (Union of Owned Territories)
+  const displayGeoData = useMemo(() => {
+      if (!geoData) return null;
+      
+      // If we don't own more than 1 territory, or no player country, just return original data
+      // We also check if we have enough territories to possibly share a border
+      if (!playerCountry || ownedTerritories.length <= 1) return geoData;
 
-  const onEachFeature = (feature: any, layer: L.Layer) => {
-    const frenchName = getFrenchName(feature.properties.name);
-    layer.on({ click: (e) => { L.DomEvent.stopPropagation(e); onRegionClick(frenchName); } });
-  };
+      const ownedFeatures: any[] = [];
+      const otherFeatures: any[] = [];
+
+      for (const feature of geoData.features) {
+          if (ownedTerritories.includes(feature.properties.name)) {
+              ownedFeatures.push(feature);
+          } else {
+              otherFeatures.push(feature);
+          }
+      }
+
+      if (ownedFeatures.length === 0) return geoData;
+
+      try {
+          // Attempt to merge all owned features into one
+          let merged = ownedFeatures[0];
+          // We iterate and union them progressively
+          for (let i = 1; i < ownedFeatures.length; i++) {
+              const u = turf.union(merged, ownedFeatures[i]);
+              if (u) merged = u;
+          }
+          
+          // Force the name of the merged feature to be the Player Country
+          // This ensures styles apply correctly as "Player" color
+          if (merged && merged.properties) {
+              merged.properties = { ...merged.properties, name: playerCountry };
+          } else if (merged) {
+              merged.properties = { name: playerCountry };
+          }
+
+          return {
+              type: "FeatureCollection",
+              features: [...otherFeatures, merged]
+          };
+      } catch (e) {
+          console.warn("Turf union failed, fallback to standard map", e);
+          return geoData;
+      }
+
+  }, [geoData, ownedTerritories, playerCountry]);
 
   const style = (feature: any) => {
-    const frenchName = getFrenchName(feature.properties.name);
-    const isOwned = ownedTerritories.includes(frenchName);
+    const countryName = feature.properties.name;
+    let fillColor = "#d1d5db"; // Gris neutre
+    
+    if (playerCountry === countryName) {
+        fillColor = "#22c55e"; // Vert joueur (inclut désormais les annexés fusionnés)
+    } else if (ownedTerritories.includes(countryName)) {
+        fillColor = "#4ade80"; // Vert annexe (cas fallback si fusion échoue)
+    } else if (neutralTerritories.includes(countryName)) {
+        fillColor = "#7f1d1d"; // Rouge foncé
+    }
+
     return {
-        fillColor: isOwned ? '#10b981' : 'transparent',
-        fillOpacity: isOwned ? 0.3 : 0, 
-        weight: isOwned ? 0 : 1, 
-        color: isOwned ? '#34d399' : 'rgba(255, 255, 255, 0.4)', 
-        dashArray: isOwned ? '' : '4',
+      fillColor,
+      weight: 1,
+      opacity: 1,
+      color: '#ffffff',
+      dashArray: '',
+      fillOpacity: 1
     };
   };
-
-  // --- GROUPING LOGIC ---
-  const groupedEntities = useMemo(() => {
-    const groups: Record<string, MapEntity[]> = {};
-    mapEntities.forEach(ent => {
-        // Group by rounding coordinates (approx 10km radius)
-        const key = `${ent.lat.toFixed(1)}_${ent.lng.toFixed(1)}`;
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(ent);
+  
+  const onEachFeature = (feature: any, layer: L.Layer) => {
+    const name = feature.properties.name;
+    layer.on({
+      click: () => {
+        onRegionClick(name);
+      },
+      mouseover: (e) => {
+        e.target.setStyle({ weight: 2, color: '#3b82f6', fillOpacity: 0.9 });
+      },
+      mouseout: (e) => {
+        e.target.setStyle({ weight: 1, color: '#ffffff', fillOpacity: 1 });
+      }
     });
-    return Object.values(groups);
-  }, [mapEntities]);
+  };
 
-  const showMarkers = zoom >= 6; // Affichage un peu plus tôt vu qu'il y a moins de marqueurs
-  const showMarkerLabels = zoom >= 8;
+  const [cachedPositions, setCachedPositions] = useState<Record<string, [number, number]>>({});
+
+  const getMarkerPosition = (entity: MapEntity): [number, number] | null => {
+      if (entity.lat !== 0 || entity.lng !== 0) return [entity.lat, entity.lng];
+      if (cachedPositions[entity.id]) return cachedPositions[entity.id];
+
+      const countryName = entity.country;
+      const feature = featureMap.current[countryName];
+      
+      if (feature) {
+          try {
+              const layer = L.geoJSON(feature);
+              const bounds = layer.getBounds();
+              const southWest = bounds.getSouthWest();
+              const northEast = bounds.getNorthEast();
+              
+              let seed = entity.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+              const pseudoRandom = () => {
+                  seed = (seed * 9301 + 49297) % 233280;
+                  return seed / 233280;
+              };
+
+              for (let i = 0; i < 50; i++) {
+                  const lat = southWest.lat + pseudoRandom() * (northEast.lat - southWest.lat);
+                  const lng = southWest.lng + pseudoRandom() * (northEast.lng - southWest.lng);
+                  if (isPointInFeature([lat, lng], feature)) return [lat, lng];
+              }
+              const backupCenter = centers.find(c => c.name === countryName);
+              if (backupCenter) return backupCenter.center;
+          } catch (e) {}
+      }
+      const manualCenter = centers.find(c => c.name === countryName);
+      if (manualCenter) return manualCenter.center;
+      return null;
+  };
+
+  if (!geoData) return <div className="text-stone-500 text-center mt-20 flex items-center justify-center h-full">Initialisation satellite...</div>;
 
   return (
-    <div className="w-full h-full absolute inset-0 z-0 bg-stone-900">
-      <MapContainer 
-        center={[20, 0]} zoom={3} scrollWheelZoom={true} minZoom={2} maxZoom={10}
-        maxBounds={[[-90, -180], [90, 180]]} zoomControl={false} attributionControl={false}
-        className="outline-none bg-stone-900 h-full w-full"
-      >
+    <MapContainer 
+        zoomControl={false} 
+        center={[20, 0]} 
+        zoom={3} 
+        style={{ height: '100%', width: '100%', background: '#e0f2fe' }} 
+        minZoom={2}
+        maxZoom={10} 
+        maxBounds={[[-90, -180], [90, 180]]}
+    >
         <MapController onZoomChange={setZoom} />
         <FlyToCountry targetCountry={focusCountry} centers={centers} />
         
-        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
+        {/* IMPORTANT: Key is essential to force re-render when territories merge */}
+        <GeoJSON 
+            key={`map-${ownedTerritories.length}-${neutralTerritories.length}`} 
+            data={displayGeoData || geoData} 
+            style={style} 
+            onEachFeature={onEachFeature} 
+        />
 
-        {geoData && <GeoJSON key={`geo-${ownedTerritories.length}`} data={geoData} style={style} onEachFeature={onEachFeature} />}
+        <MapLabels 
+            zoom={zoom} 
+            visibleCountries={centers} 
+            playerCountry={playerCountry}
+            ownedTerritories={ownedTerritories}
+            neutralTerritories={neutralTerritories}
+        />
+        
+        <CapitalMarkers 
+            zoom={zoom} 
+            ownedTerritories={ownedTerritories}
+            playerCountry={playerCountry}
+        />
 
-        <MapLabels zoom={zoom} visibleCountries={centers} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
-
-        {showMarkers && groupedEntities.map((group, idx) => {
-             const first = group[0];
-             // const isGroup = group.length > 1; // Unused
-             const labels = group.map(e => e.label || getEntityLabel(e.type));
-             const color = getEntityColor(first.type);
-             
-             // If positions are 0,0 try to find better center (fallback)
-             let pos: [number, number] = [first.lat, first.lng];
-             if (pos[0] === 0 && pos[1] === 0) {
-                 const override = LABEL_OVERRIDES[first.country];
-                 if (override) pos = override;
-                 else {
-                     const c = centers.find(x => x.name === first.country);
-                     if (c) pos = c.center;
-                     else if (CAPITAL_DATA[first.country]) pos = CAPITAL_DATA[first.country].coords;
-                 }
-             }
-
-             const icon = createDotIcon(color, labels, first.type, showMarkerLabels);
-
+        {mapEntities.map((entity) => {
+             if (zoom < 6) return null;
+             const position = getMarkerPosition(entity);
+             if (!position) return null;
+             const showLabel = zoom >= 8;
              return (
-                 <Marker 
-                    key={`group-${idx}-${group.length}`} 
-                    position={pos} 
-                    icon={icon} 
-                    zIndexOffset={500}
-                 >
-                     {!showMarkerLabels && (
-                         <Popup>
-                             <div className="text-center p-1">
-                                 {group.map((e, i) => (
-                                     <div key={i} className="mb-1 last:mb-0">
-                                         <strong className="uppercase text-[10px] block" style={{color: getEntityColor(e.type)}}>
-                                             {getEntityLabel(e.type)}
-                                         </strong>
-                                         <span className="text-[9px] text-stone-500">{e.country}</span>
-                                     </div>
-                                 ))}
-                             </div>
-                         </Popup>
-                     )}
-                 </Marker>
+                <Marker
+                    key={entity.id}
+                    position={position}
+                    icon={createDotIcon(getEntityColor(entity.type), [], entity.type, showLabel)}
+                >
+                    <Popup>{entity.label || getEntityLabel(entity.type)}</Popup>
+                </Marker>
              );
         })}
 
-      </MapContainer>
-    </div>
+    </MapContainer>
   );
 };
 
