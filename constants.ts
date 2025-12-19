@@ -313,3 +313,9 @@ export const getFrenchName = (name: string): string => {
     // 4. Fallback: retourne le nom tel quel (l'utilisateur verra le nom anglais du GeoJSON)
     return name;
 };
+
+export const isCountryLandlocked = (country: string | null): boolean => {
+    if (!country) return true;
+    const norm = normalizeCountryName(country);
+    return LANDLOCKED_COUNTRIES.some(c => c.toLowerCase() === norm.toLowerCase() || c.toLowerCase() === country.toLowerCase());
+};
