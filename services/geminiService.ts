@@ -220,10 +220,10 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
     try {
         if (!HUGGINGFACE_API_KEY) throw new Error("No Hugging Face Key");
         
-        // Using Zephyr-7b-beta which is generally available on free inference API and good with JSON
-        const MODEL_ID = "HuggingFaceH4/zephyr-7b-beta"; 
+        // Using Phi-3.5-mini-instruct which is generally available on free inference API and good with JSON
+        const MODEL_ID = "microsoft/Phi-3.5-mini-instruct"; 
         
-        const fullPrompt = `<|system|>\n${system}\n</s>\n<|user|>\n${prompt}\n</s>\n<|assistant|>\n`;
+        const fullPrompt = `<|system|>\n${system}\n<|end|>\n<|user|>\n${prompt}\n<|end|>\n<|assistant|>\n`;
 
         const response = await fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
             method: "POST",
@@ -234,7 +234,7 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
             body: JSON.stringify({
                 inputs: fullPrompt,
                 parameters: {
-                    max_new_tokens: 1500,
+                    max_new_tokens: 2000,
                     return_full_text: false, // Only get the generated part
                     temperature: 0.7,
                     do_sample: true
