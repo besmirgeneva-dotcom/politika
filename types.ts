@@ -1,5 +1,4 @@
 
-
 export interface GameEvent {
   id: string;
   date: string;
@@ -44,8 +43,9 @@ export interface GameState {
   gameId: string;
   currentDate: Date;
   playerCountry: string | null;
-  ownedTerritories: string[];
-  neutralTerritories: string[]; // NOUVEAU: Pays détruits / non revendiqués
+  ownedTerritories: string[]; // Territoires du JOUEUR
+  occupiedTerritories: Record<string, string>; // Territoires occupés par l'IA (Pays -> Propriétaire)
+  neutralTerritories: string[]; // Pays détruits / non revendiqués
   mapEntities: MapEntity[];
   infrastructure: Record<string, Record<string, number>>;
   turn: number;
@@ -68,6 +68,7 @@ export interface GameState {
 
 export interface SimulationResponse {
   timeIncrement: 'day' | 'month' | 'year';
+  tokenUsage?: number; // NOUVEAU: Compteur de tokens estimés
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
     headline: string;

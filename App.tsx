@@ -119,6 +119,7 @@ const App: React.FC = () => {
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
   const [isSyncing, setIsSyncing] = useState(true); // Default to true until listener loads
   const [isGlobalLoading, setIsGlobalLoading] = useState(false); // NEW: Global loading state for heavy ops
+  const [tokenCount, setTokenCount] = useState(0); // NEW: Token usage tracker
 
   // Bug Report State
   const [showBugReportModal, setShowBugReportModal] = useState(false);
@@ -141,9 +142,10 @@ const App: React.FC = () => {
     currentDate: INITIAL_DATE,
     playerCountry: null,
     ownedTerritories: [],
-    neutralTerritories: [], // NOUVEAU
+    occupiedTerritories: {},
+    neutralTerritories: [],
     mapEntities: [],
-    infrastructure: {}, // NOUVEAU: Pour stocker les usines, etc.
+    infrastructure: {}, // Init empty infrastructure
     turn: 1,
     events: [],
     isProcessing: false,
@@ -151,7 +153,7 @@ const App: React.FC = () => {
     economyHealth: 50,
     militaryPower: 50,
     popularity: 60,
-    corruption: 30, // Default balanced corruption
+    corruption: 30,
     hasNuclear: false,
     hasSpaceProgram: false,
     militaryRank: 100,
@@ -328,11 +330,12 @@ const App: React.FC = () => {
           try {
               data.state.currentDate = new Date(data.state.currentDate);
               
-              // MIGRATION: Fusion avec l'état par défaut pour garantir que les nouveaux champs (neutralTerritories) existent
+              // MIGRATION: Fusion avec l'état par défaut
               const migratedState = {
                   ...gameState, // Valeurs par défaut
                   ...data.state, // Valeurs sauvegardées (écrasent les défauts)
                   neutralTerritories: data.state.neutralTerritories || [], // Force le tableau vide si manquant
+                  occupiedTerritories: data.state.occupiedTerritories || {}, // Force objet vide si manquant
                   infrastructure: data.state.infrastructure || {}
               };
 
@@ -470,6 +473,7 @@ const App: React.FC = () => {
         currentDate: INITIAL_DATE,
         playerCountry: null,
         ownedTerritories: [],
+        occupiedTerritories: {},
         neutralTerritories: [],
         mapEntities: [],
         infrastructure: {}, // Init empty infrastructure
@@ -495,6 +499,7 @@ const App: React.FC = () => {
       setShowStartModal(true);
       setAppMode('game_active');
       setCurrentScreen('splash'); 
+      setTokenCount(0); // Reset tokens
   };
 
   // --- GAMEPLAY EFFECTS ---
@@ -563,7 +568,7 @@ const App: React.FC = () => {
       return await getStrategicSuggestions(gameState.playerCountry, fullHistory, aiProvider);
   }
 
-  // --- DIPLOMATIC CHAT HANDLER (UPDATED FOR BATCHING) ---
+  // --- DIPLOMATIC CHAT HANDLER (UPDATED FOR BATCHING & GROUP TARGETING) ---
   const handleSendChatMessage = async (targets: string[], message: string) => {
       if (!gameState.playerCountry) return;
 
@@ -594,8 +599,6 @@ const App: React.FC = () => {
       const updatedHistoryForContext = [...gameState.chatHistory, userMsg];
 
       try {
-        // STRATEGIE 1: BATCHING (Token Saving)
-        // On envoie une seule requête pour tous les destinataires, au lieu de map()
         const aiResponses = await sendDiplomaticMessage(
             gameState.playerCountry!,
             targets,
@@ -605,16 +608,30 @@ const App: React.FC = () => {
             aiProvider
         );
 
-        const newMessages: ChatMessage[] = aiResponses.map(resp => ({
-            id: `msg-${Date.now()}-${resp.sender}`,
-            sender: 'ai',
-            senderName: resp.sender,
-            targets: targets,
-            text: resp.text,
-            timestamp: Date.now() + Math.floor(Math.random() * 500),
-            isRead: false
-        }));
+        let totalUsage = 0;
 
+        const newMessages: ChatMessage[] = aiResponses.map(resp => {
+            totalUsage += resp.usage;
+            
+            // LOGIQUE DE CIBLAGE GROUPE CORRIGÉE:
+            // Si l'IA répond (ex: France), elle doit cibler [Joueur + Les autres destinataires originaux] - Elle-même.
+            // Ex: Joueur écrit à [France, Allemagne]. 
+            // France répond. Cibles de France = [Joueur, Allemagne].
+            const allParticipants = [gameState.playerCountry!, ...targets];
+            const responseTargets = allParticipants.filter(p => p !== resp.sender).map(normalizeCountryName);
+
+            return {
+                id: `msg-${Date.now()}-${resp.sender}`,
+                sender: 'ai',
+                senderName: resp.sender,
+                targets: responseTargets,
+                text: resp.text,
+                timestamp: Date.now() + Math.floor(Math.random() * 500),
+                isRead: false
+            };
+        });
+
+        setTokenCount(prev => prev + totalUsage);
         setTypingParticipants([]);
 
         setGameState(prev => ({
@@ -731,6 +748,10 @@ const App: React.FC = () => {
         gameState.alliance
     );
 
+    if (result.tokenUsage) {
+        setTokenCount(prev => prev + result.tokenUsage!);
+    }
+
     const nextDate = new Date(gameState.currentDate);
     if (result.timeIncrement === 'day') nextDate.setDate(nextDate.getDate() + 1);
     else if (result.timeIncrement === 'year') nextDate.setFullYear(nextDate.getFullYear() + 1);
@@ -748,6 +769,7 @@ const App: React.FC = () => {
     let newOwnedTerritories = [...gameState.ownedTerritories];
     // FIX: Secure array access for old saves that might miss this field
     let newNeutralTerritories = [...(gameState.neutralTerritories || [])];
+    let newOccupiedTerritories = { ...gameState.occupiedTerritories }; // Copie de la map d'occupation
     let newEntities = [...gameState.mapEntities];
     let newInfrastructure = JSON.parse(JSON.stringify(gameState.infrastructure || {})); // Deep copy
 
@@ -762,6 +784,8 @@ const App: React.FC = () => {
                 const target = normalizeCountryName(update.targetCountry);
                 // On le retire des pays possédés (si c'était le joueur ou un autre)
                 newOwnedTerritories = newOwnedTerritories.filter(t => t !== target);
+                if (newOccupiedTerritories[target]) delete newOccupiedTerritories[target];
+
                 // On l'ajoute aux territoires neutres/détruits
                 if (!newNeutralTerritories.includes(target)) {
                     newNeutralTerritories.push(target);
@@ -776,25 +800,42 @@ const App: React.FC = () => {
                 // Si le territoire était neutre/détruit, on le "revendique" (retire de la liste neutre)
                 newNeutralTerritories = newNeutralTerritories.filter(t => t !== target);
 
-                if (newOwnedTerritories.includes(target)) {
-                    if (newOwner !== gameState.playerCountry) {
-                        newOwnedTerritories = newOwnedTerritories.filter(t => t !== target);
+                // GESTION CONQUETE JOUEUR
+                if (newOwner === gameState.playerCountry) {
+                    if (!newOwnedTerritories.includes(target)) {
+                        newOwnedTerritories.push(target);
                     }
-                }
-                if (newOwner === gameState.playerCountry && !newOwnedTerritories.includes(target)) {
-                    newOwnedTerritories.push(target);
+                    // Si c'était occupé par une IA, on supprime l'occupation
+                    if (newOccupiedTerritories[target]) delete newOccupiedTerritories[target];
+
                     if (hasNuclearArsenal(target)) newHasNuclear = true;
+                } 
+                // GESTION CONQUETE IA (IA contre IA ou IA contre Joueur)
+                else {
+                    // Si le joueur possédait ce territoire, il le perd
+                    newOwnedTerritories = newOwnedTerritories.filter(t => t !== target);
+                    // On enregistre le nouveau propriétaire IA
+                    newOccupiedTerritories[target] = newOwner;
                 }
             } else if (update.type === 'remove_entity') {
                 newEntities = newEntities.filter(e => e.id !== update.entityId && e.label !== update.label);
             } else if (update.type === 'build_base' || update.type === 'build_defense') {
+                const entityType: MapEntityType = update.type === 'build_base' ? 'military_base' : 'defense_system';
+                
+                // FIX LABEL MAP: Si le label fourni par l'IA est "build_base" (erreur fréquente), on le remplace
+                let displayLabel = update.label;
+                const badLabels = ['build_base', 'build_defense', 'defense_system', 'military_base'];
+                if (!displayLabel || badLabels.includes(displayLabel)) {
+                     displayLabel = entityType === 'military_base' ? 'Base Avancée' : 'Système Défensif';
+                }
+
                 newEntities.push({
                     id: `ent-${Date.now()}-${Math.random()}`,
-                    type: update.type as MapEntityType,
+                    type: entityType,
                     country: normalizeCountryName(update.targetCountry), // Normalisation ici aussi
                     lat: update.lat || 0,
                     lng: update.lng || 0,
-                    label: update.label
+                    label: displayLabel
                 });
             }
         }
@@ -882,11 +923,35 @@ const App: React.FC = () => {
 
     setFullHistory(newHistory);
 
-    const newGlobalTension = Math.max(0, Math.min(100, gameState.globalTension + result.globalTensionChange));
-    const newEconomyHealth = Math.max(0, Math.min(100, gameState.economyHealth + result.economyHealthChange));
-    const newMilitaryPower = Math.max(0, Math.min(100, gameState.militaryPower + result.militaryPowerChange));
-    const newPopularity = Math.max(0, Math.min(100, gameState.popularity + (result.popularityChange || 0)));
-    const newCorruption = Math.max(0, Math.min(100, gameState.corruption + (result.corruptionChange || 0)));
+    // --- APPLY NATURAL DRIFT (GAUGE DYNAMICS) ---
+    // Logique d'ENTROPIE : Plus on est haut, plus on a de chance de baisser naturellement
+    // Cela force le joueur à agir pour maintenir ses stats
+    const applyNaturalDrift = (aiValue: number, currentValue: number) => {
+        let drift = 0;
+
+        // Entropie naturelle (si pas de mouvement de l'IA)
+        if (aiValue === 0) {
+             // Si stat > 50, 40% de chance de -1 (déclin naturel)
+             if (currentValue > 50 && Math.random() > 0.6) drift = -1;
+             // Si stat > 80, 60% de chance de -2 (plus dur de rester au sommet)
+             if (currentValue > 80 && Math.random() > 0.4) drift = -2;
+        }
+
+        return Math.max(0, Math.min(100, currentValue + aiValue + drift));
+    };
+
+    const newGlobalTension = applyNaturalDrift(result.globalTensionChange, gameState.globalTension);
+    const newEconomyHealth = applyNaturalDrift(result.economyHealthChange, gameState.economyHealth);
+    const newPopularity = applyNaturalDrift(result.popularityChange || 0, gameState.popularity);
+    
+    // Corruption monte naturellement si on ne fait rien
+    const corruptionDrift = result.corruptionChange === 0 && Math.random() > 0.8 ? 1 : result.corruptionChange || 0;
+    const newCorruption = Math.max(0, Math.min(100, gameState.corruption + corruptionDrift));
+    
+    // Militaire est plus stable, mais coûte cher à maintenir si très haut
+    let milDrift = result.militaryPowerChange;
+    if (gameState.militaryPower > 90 && milDrift === 0 && Math.random() > 0.7) milDrift = -1;
+    const newMilitaryPower = Math.max(0, Math.min(100, gameState.militaryPower + milDrift));
     
     let newHasSpaceProgram = gameState.hasSpaceProgram;
     if (result.spaceProgramActive === true) {
@@ -937,7 +1002,8 @@ const App: React.FC = () => {
         currentDate: nextDate,
         turn: gameState.turn + 1,
         ownedTerritories: newOwnedTerritories,
-        neutralTerritories: newNeutralTerritories, // NEW
+        neutralTerritories: newNeutralTerritories, 
+        occupiedTerritories: newOccupiedTerritories, // NEW: Mise à jour du state
         mapEntities: newEntities,
         infrastructure: newInfrastructure, // Mise à jour de l'infra
         globalTension: newGlobalTension,
@@ -1174,191 +1240,6 @@ const App: React.FC = () => {
       );
   }
 
-  if (appMode === 'portal_dashboard') {
-      return (
-          <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
-              {isGlobalLoading && (
-                  <div className="fixed inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
-                      <GameLogo size="small" theme="light" />
-                      <div className="mt-6 text-emerald-600 font-bold text-lg animate-pulse tracking-widest uppercase">
-                          Chargement des données...
-                      </div>
-                      <p className="text-xs text-slate-400 mt-2">Récupération depuis le Cloud sécurisé</p>
-                  </div>
-              )}
-              <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center sticky top-0 z-20">
-                  <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 bg-black rounded-full"></div>
-                      <h1 className="text-xl font-black uppercase tracking-tight">Politika <span className="text-slate-400 font-normal normal-case ml-2">Tableau de bord</span></h1>
-                  </div>
-                  {user ? (
-                      <div className="flex items-center gap-4">
-                          <button 
-                            onClick={() => setShowBugReportModal(true)}
-                            className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 transition-colors mr-2 hidden md:block"
-                          >
-                              🐞 Signaler bug
-                          </button>
-                          <div className="text-right hidden md:block">
-                              <div className="text-sm font-bold">{user.displayName || user.email}</div>
-                              <div className="text-[10px] text-slate-500 uppercase">Connecté</div>
-                          </div>
-                          {user.photoURL ? (
-                              <img src={user.photoURL} className="w-10 h-10 rounded-full border border-slate-200" alt="" />
-                          ) : (
-                              <div className="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold">
-                                  {user.email ? user.email[0].toUpperCase() : 'U'}
-                              </div>
-                          )}
-                          <button onClick={handleLogout} className="bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-500 p-2 rounded-lg transition-colors">
-                              ✕
-                          </button>
-                      </div>
-                  ) : (
-                      <button 
-                        onClick={handleLogin}
-                        className="text-xs font-bold bg-black text-white px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
-                      >
-                          Se connecter
-                      </button>
-                  )}
-              </header>
-              <main className="max-w-6xl mx-auto p-6 md:p-10">
-                  <h2 className="text-3xl font-bold mb-8 text-slate-900">Bibliothèque</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      <div 
-                        className="group bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer flex flex-col h-80 relative"
-                        onClick={launchGeoSim}
-                      >
-                          <div className="h-40 bg-slate-800 relative overflow-hidden">
-                              <div className="absolute inset-0 opacity-40 bg-[url('https://upload.wikimedia.org/wikipedia/commons/e/ec/World_map_blank_without_borders.svg')] bg-cover bg-center group-hover:scale-105 transition-transform duration-700"></div>
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
-                              <div className="absolute bottom-4 left-4">
-                                  <GameLogo size="small" theme="dark" />
-                              </div>
-                          </div>
-                          <div className="p-6 flex-1 flex flex-col">
-                              <div className="flex justify-between items-start mb-2">
-                                  <h3 className="text-xl font-bold">GeoSim</h3>
-                                  <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded uppercase">Installé</span>
-                              </div>
-                              <p className="text-sm text-slate-500 mb-4 line-clamp-2">
-                                  Simulation géopolitique mondiale alimentée par IA générative. Scénario An 2000.
-                              </p>
-                              <div className="mt-auto">
-                                  <button className="w-full py-3 bg-black text-white font-bold rounded-lg group-hover:bg-blue-600 transition-colors">
-                                      LANCER
-                                  </button>
-                              </div>
-                          </div>
-                      </div>
-                      <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm flex flex-col h-80 col-span-1 md:col-span-1 lg:col-span-2">
-                          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                              <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                  <span>💾</span> Sauvegardes Cloud
-                              </h3>
-                              <span className="text-xs text-slate-400 font-mono">
-                                {isSyncing ? "Live Sync..." : `${availableSaves.length} fichiers`}
-                              </span>
-                          </div>
-                          <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                              {isSyncing && availableSaves.length === 0 ? (
-                                  <div className="h-full flex items-center justify-center text-slate-400 animate-pulse text-xs">
-                                      Chargement des données...
-                                  </div>
-                              ) : availableSaves.length === 0 ? (
-                                  <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                                      <span className="text-2xl opacity-30 mb-2">📂</span>
-                                      <p className="text-sm">Aucune partie sauvegardée.</p>
-                                  </div>
-                              ) : (
-                                  availableSaves.map(save => (
-                                      <div key={save.id} className="group flex items-center gap-4 p-3 hover:bg-blue-50 rounded-xl transition-colors border border-transparent hover:border-blue-100">
-                                          <div className="w-12 h-8 rounded bg-slate-200 overflow-hidden shadow-sm relative shrink-0">
-                                              <img src={getFlagUrl(save.country) || ''} alt={save.country} className="w-full h-full object-cover" />
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                              <div className="font-bold text-slate-800 text-sm truncate">{save.country}</div>
-                                              <div className="text-xs text-slate-500">Tour {save.turn} • {save.date}</div>
-                                          </div>
-                                          <div className="flex gap-2">
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); loadGameById(save.id); }}
-                                                className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-colors shadow-sm"
-                                            >
-                                                Charger
-                                            </button>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); deleteSave(save.id); }}
-                                                className="px-3 py-2 bg-white border border-slate-200 text-red-500 text-xs font-bold rounded-lg hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm"
-                                                title="Supprimer"
-                                            >
-                                                🗑
-                                            </button>
-                                          </div>
-                                      </div>
-                                  ))
-                              )}
-                          </div>
-                      </div>
-                  </div>
-              </main>
-              {showBugReportModal && (
-                  <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-slate-200 animate-fade-in-up">
-                          <div className="flex justify-between items-center mb-4">
-                              <h3 className="text-xl font-bold text-red-600 flex items-center gap-2">
-                                  <span>🐞</span> Signaler un bug
-                              </h3>
-                              <button 
-                                onClick={() => setShowBugReportModal(false)}
-                                className="text-slate-400 hover:text-slate-600 font-bold"
-                              >
-                                  ✕
-                              </button>
-                          </div>
-                          <div className="space-y-4">
-                              <div>
-                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Titre du problème</label>
-                                  <input 
-                                    type="text"
-                                    className="w-full p-2 rounded-lg border border-slate-300 focus:outline-red-500 bg-slate-50 text-sm"
-                                    placeholder="Ex: Le jeu bloque au tour 5"
-                                    value={bugTitle}
-                                    onChange={(e) => setBugTitle(e.target.value)}
-                                  />
-                              </div>
-                              <div>
-                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Description détaillée</label>
-                                  <textarea 
-                                    className="w-full p-2 rounded-lg border border-slate-300 focus:outline-red-500 bg-slate-50 text-sm h-32 resize-none"
-                                    placeholder="Décrivez ce qui s'est passé..."
-                                    value={bugDescription}
-                                    onChange={(e) => setBugDescription(e.target.value)}
-                                  />
-                              </div>
-                              <button 
-                                onClick={handleSendBugReport}
-                                disabled={isSendingBug}
-                                className={`w-full py-3 rounded-lg font-bold text-white shadow-md transition-colors ${
-                                    isSendingBug ? 'bg-slate-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'
-                                }`}
-                              >
-                                  {isSendingBug ? 'Envoi...' : 'Envoyer le rapport'}
-                              </button>
-                          </div>
-                      </div>
-                  </div>
-              )}
-              {notification && (
-                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2">
-                    <span className="text-emerald-400">✓</span> {notification}
-                </div>
-              )}
-          </div>
-      );
-  }
-
   if (appMode === 'game_active') {
     if (currentScreen === 'splash') {
         return (
@@ -1387,10 +1268,12 @@ const App: React.FC = () => {
             <WorldMap 
                 playerCountry={gameState.playerCountry}
                 ownedTerritories={gameState.ownedTerritories}
-                neutralTerritories={gameState.neutralTerritories} // NEW
+                neutralTerritories={gameState.neutralTerritories} 
+                occupiedTerritories={gameState.occupiedTerritories} // PASSAGE DE LA NOUVELLE PROP
                 mapEntities={gameState.mapEntities}
                 onRegionClick={handleRegionSelect}
                 focusCountry={focusCountry}
+                key={`map-${gameState.turn}`} // Force re-render on turn change for tooltip updates
             />
         </div>
 
@@ -1549,6 +1432,10 @@ const App: React.FC = () => {
 
                 <div className="absolute top-4 right-4 z-20 flex flex-col items-end gap-1 pointer-events-none">
                     <div className="flex items-center gap-2 pointer-events-auto">
+                        <div className="bg-black/50 backdrop-blur-md px-2 py-1 rounded text-[10px] text-emerald-400 font-mono border border-emerald-900/50 shadow mr-2">
+                             TOKEN: {tokenCount}
+                        </div>
+
                         {user && (
                             <div className="w-9 h-9 rounded-full border-2 border-emerald-500 overflow-hidden shadow-lg" title={user.displayName}>
                                 {user.photoURL ? (
@@ -1713,59 +1600,199 @@ const App: React.FC = () => {
                             </div>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold uppercase text-stone-500 mb-2">Niveau de Chaos (IA Behavior)</label>
-                            <div className="grid grid-cols-2 gap-2">
-                                {['peaceful', 'normal', 'high', 'chaos'].map((level) => (
-                                    <button
-                                        key={level}
-                                        onClick={() => setGameState(prev => ({...prev, chaosLevel: level as ChaosLevel}))}
-                                        className={`py-2 px-2 text-xs font-bold rounded-lg border-2 transition-all capitalize ${
-                                            gameState.chaosLevel === level 
-                                            ? level === 'chaos' ? 'bg-red-100 border-red-500 text-red-600' : 'bg-blue-100 border-blue-500 text-blue-600'
-                                            : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
-                                        }`}
-                                    >
-                                        {level === 'peaceful' ? '🕊️ Pacifique' : 
-                                        level === 'normal' ? '⚖️ Standard' : 
-                                        level === 'high' ? '🔥 Tendu' : '💀 Chaos'}
-                                    </button>
-                                ))}
+                            <label className="block text-xs font-bold uppercase text-stone-500 mb-2">Version</label>
+                            <div className="text-[10px] text-stone-400">
+                                v1.0.0 Alpha
                             </div>
                         </div>
-                        <div className="pt-4 border-t border-stone-200 flex flex-col gap-2">
-                            <button 
-                                onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} 
-                                className="w-full py-3 text-white font-bold rounded-lg shadow flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500"
-                            >
-                                ☁️ Sauvegarder (Cloud)
-                            </button>
-                            <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow">Charger une partie</button>
-                            <button onClick={() => setIsSettingsOpen(false)} className="w-full py-3 bg-stone-800 text-white font-bold rounded-lg">Reprendre</button>
-                            <button onClick={handleExitToDashboard} className="w-full py-3 bg-stone-200 text-stone-600 font-bold rounded-lg">Quitter vers Tableau de bord</button>
-                        </div>
+
+                        <button 
+                            onClick={handleExitToDashboard}
+                            className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-md mt-6"
+                        >
+                            Quitter la partie
+                        </button>
+                         <button 
+                            onClick={() => setIsSettingsOpen(false)}
+                            className="w-full py-3 bg-stone-200 hover:bg-stone-300 text-stone-600 font-bold rounded-lg mt-2"
+                        >
+                            Retour
+                        </button>
                     </div>
                 </div>
             </div>
         )}
+        
+        {/* Load Menu Overlay */}
         {isLoadMenuOpen && renderLoadMenuOverlay()}
-        {notification && (
-            <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2">
-                <span className="text-emerald-400">✓</span> {notification}
+        
+        {/* Bug Report Modal */}
+        {showBugReportModal && (
+            <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full">
+                    <h3 className="text-lg font-bold mb-4">Signaler un bug</h3>
+                    <input 
+                        className="w-full border p-2 rounded mb-2 text-sm" 
+                        placeholder="Titre" 
+                        value={bugTitle} 
+                        onChange={e => setBugTitle(e.target.value)} 
+                    />
+                    <textarea 
+                        className="w-full border p-2 rounded mb-4 text-sm h-24" 
+                        placeholder="Description..." 
+                        value={bugDescription} 
+                        onChange={e => setBugDescription(e.target.value)} 
+                    />
+                    <div className="flex gap-2">
+                        <button onClick={() => setShowBugReportModal(false)} className="flex-1 bg-stone-200 py-2 rounded font-bold text-sm">Annuler</button>
+                        <button onClick={handleSendBugReport} disabled={isSendingBug} className="flex-1 bg-blue-600 text-white py-2 rounded font-bold text-sm">
+                            {isSendingBug ? 'Envoi...' : 'Envoyer'}
+                        </button>
+                    </div>
+                </div>
             </div>
         )}
-        {gameState.playerCountry && !gameState.isGameOver && (
-            <DateControls 
-                currentDate={gameState.currentDate}
-                turn={gameState.turn}
-                onNextTurn={handleNextTurn}
-                isProcessing={gameState.isProcessing}
-            />
+
+        <DateControls 
+            currentDate={gameState.currentDate}
+            turn={gameState.turn}
+            onNextTurn={handleNextTurn}
+            isProcessing={gameState.isProcessing}
+        />
+        
+        {/* Notifications */}
+        {notification && (
+            <div className="absolute top-10 left-1/2 -translate-x-1/2 z-[60] bg-stone-800 text-white px-4 py-2 rounded-full shadow-lg text-sm font-bold animate-fade-in-down">
+                {notification}
+            </div>
         )}
-        </div>
+
+    </div>
     );
   }
 
-  return null;
+  // PORTAL DASHBOARD
+  if (appMode === 'portal_dashboard') {
+      return (
+        <div className="min-h-screen bg-stone-100 font-sans text-stone-900">
+             <nav className="bg-white px-6 py-4 shadow-sm flex justify-between items-center">
+                 <div className="flex items-center gap-2">
+                     <GameLogo size="small" theme="light" />
+                     <span className="font-bold text-lg tracking-tight">POLITIKA <span className="text-stone-400 text-xs">QG</span></span>
+                 </div>
+                 <div className="flex items-center gap-4">
+                     {user && (
+                         <div className="text-xs font-bold text-stone-600">
+                             {user.displayName || user.email}
+                         </div>
+                     )}
+                     <button onClick={handleLogout} className="text-red-500 text-xs font-bold border border-red-200 px-3 py-1.5 rounded hover:bg-red-50">
+                         Déconnexion
+                     </button>
+                 </div>
+             </nav>
+             
+             <main className="max-w-5xl mx-auto p-6 mt-8">
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     {/* Launch Panel */}
+                     <div className="md:col-span-2 space-y-6">
+                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
+                             <h2 className="text-2xl font-black mb-2">NOUVELLE MISSION</h2>
+                             <p className="text-stone-500 mb-6 text-sm">Initialiser une nouvelle simulation géopolitique en l'an 2000.</p>
+                             <button 
+                                onClick={launchGeoSim}
+                                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg"
+                             >
+                                 🚀 INITIALISER
+                             </button>
+                         </div>
+                         
+                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
+                             <h2 className="text-lg font-bold mb-4">Sauvegardes Cloud</h2>
+                             {availableSaves.length === 0 ? (
+                                 <div className="text-center py-8 text-stone-400 text-sm border-2 border-dashed border-stone-100 rounded-xl">
+                                     Aucune donnée trouvée.
+                                 </div>
+                             ) : (
+                                 <div className="space-y-3">
+                                     {availableSaves.map(save => (
+                                         <div key={save.id} className="flex items-center justify-between p-3 bg-stone-50 rounded-lg border border-stone-100 hover:border-blue-300 transition-colors cursor-pointer" onClick={() => loadGameById(save.id)}>
+                                             <div className="flex items-center gap-3">
+                                                 <img src={getFlagUrl(save.country) || ''} className="w-10 h-6 object-cover rounded shadow-sm" alt="" />
+                                                 <div>
+                                                     <div className="font-bold text-sm">{save.country}</div>
+                                                     <div className="text-[10px] text-stone-500">{save.date} (Tour {save.turn})</div>
+                                                 </div>
+                                             </div>
+                                             <div className="text-blue-600 font-bold text-xs">CHARGER</div>
+                                         </div>
+                                     ))}
+                                 </div>
+                             )}
+                         </div>
+                     </div>
+                     
+                     {/* Stats Panel */}
+                     <div className="space-y-6">
+                         <div className="bg-stone-900 text-white p-6 rounded-2xl shadow-xl">
+                             <h3 className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-4">Système</h3>
+                             <div className="space-y-2 text-sm">
+                                 <div className="flex justify-between">
+                                     <span>Serveur</span>
+                                     <span className="text-emerald-400 font-bold">En ligne</span>
+                                 </div>
+                                 <div className="flex justify-between">
+                                     <span>IA</span>
+                                     <span className="text-blue-400 font-bold">{aiProvider.toUpperCase()}</span>
+                                 </div>
+                                 <div className="flex justify-between">
+                                     <span>Latence</span>
+                                     <span className="text-stone-400">24ms</span>
+                                 </div>
+                             </div>
+                         </div>
+                         <div className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white p-6 rounded-2xl shadow-lg">
+                             <h3 className="font-bold text-lg mb-2">Feedback</h3>
+                             <p className="text-xs text-indigo-100 mb-4">Aidez-nous à améliorer la simulation.</p>
+                             <button onClick={() => setShowBugReportModal(true)} className="w-full py-2 bg-white/10 hover:bg-white/20 rounded font-bold text-xs border border-white/20">
+                                 Signaler un problème
+                             </button>
+                         </div>
+                     </div>
+                 </div>
+             </main>
+             
+             {/* Bug Modal (Reused) */}
+             {showBugReportModal && (
+                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full">
+                        <h3 className="text-lg font-bold mb-4">Signaler un bug</h3>
+                        <input 
+                            className="w-full border p-2 rounded mb-2 text-sm" 
+                            placeholder="Titre" 
+                            value={bugTitle} 
+                            onChange={e => setBugTitle(e.target.value)} 
+                        />
+                        <textarea 
+                            className="w-full border p-2 rounded mb-4 text-sm h-24" 
+                            placeholder="Description..." 
+                            value={bugDescription} 
+                            onChange={e => setBugDescription(e.target.value)} 
+                        />
+                        <div className="flex gap-2">
+                            <button onClick={() => setShowBugReportModal(false)} className="flex-1 bg-stone-200 py-2 rounded font-bold text-sm">Annuler</button>
+                            <button onClick={handleSendBugReport} disabled={isSendingBug} className="flex-1 bg-blue-600 text-white py-2 rounded font-bold text-sm">
+                                {isSendingBug ? 'Envoi...' : 'Envoyer'}
+                            </button>
+                        </div>
+                    </div>
+                 </div>
+             )}
+        </div>
+      );
+  }
+
+  return null; // Fallback
 };
 
 export default App;
