@@ -36,17 +36,35 @@ export const useGamePersistence = (user: any) => {
 
     const saveGame = async (state: GameState, history: GameEvent[], aiProvider: string, tokenCount: number, showNotif = true) => {
         if (!user || !db) { showNotification("Connexion requise !"); return; }
+        
         const metadata: SaveMetadata = {
             id: state.gameId, country: state.playerCountry || "Inconnu",
             date: state.currentDate.toLocaleDateString('fr-FR'), turn: state.turn, lastPlayed: Date.now()
         };
+
         try {
+            // SANITIZATION CRITIQUE : Firestore rejette les valeurs 'undefined'.
+            // JSON.stringify supprime les clés undefined et convertit les Dates en string ISO.
+            // C'est nécessaire pour que la sauvegarde fonctionne avec des types optionnels.
+            const cleanState = JSON.parse(JSON.stringify(state));
+            const cleanHistory = JSON.parse(JSON.stringify(history));
+
             const batch = writeBatch(db);
-            batch.set(doc(db, "users", user.uid, "games", state.gameId), { metadata, state, history, aiProvider, tokenCount });
+            batch.set(doc(db, "users", user.uid, "games", state.gameId), { 
+                metadata, 
+                state: cleanState, 
+                history: cleanHistory, 
+                aiProvider, 
+                tokenCount 
+            });
             batch.set(doc(db, "users", user.uid, "game_metas", state.gameId), metadata);
             await batch.commit();
+            
             if (showNotif) showNotification("Sauvegarde Cloud réussie !");
-        } catch (e) { showNotification("Échec Sauvegarde"); }
+        } catch (e) { 
+            console.error("ERREUR SAUVEGARDE:", e);
+            showNotification("Échec Sauvegarde (Voir Console)"); 
+        }
     };
 
     const deleteGame = async (id: string) => {
@@ -69,7 +87,10 @@ export const useGamePersistence = (user: any) => {
             const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                data.state.currentDate = new Date(data.state.currentDate);
+                // Re-hydration de la date car JSON.stringify l'a transformée en string
+                if (typeof data.state.currentDate === 'string') {
+                    data.state.currentDate = new Date(data.state.currentDate);
+                }
                 showNotification("Partie chargée.");
                 return data;
             }

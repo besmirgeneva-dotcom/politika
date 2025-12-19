@@ -253,6 +253,10 @@ RÈGLES CRITIQUES:
    - po: Popularity Change
    - co: Corruption Change
    - mu: Map Updates (annexation, build_base...)
+5. INTERDICTION ABSOLUE:
+   - Tu ne gères PAS la sauvegarde du jeu.
+   - Tu ne gères PAS les menus.
+   - Tu simules UNIQUEMENT le monde et les conséquences.
 `;
 
 export const simulateTurn = async (

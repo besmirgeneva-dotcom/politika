@@ -283,7 +283,11 @@ const App: React.FC = () => {
     setFullHistory([...fullHistory, ...newAiEvents]);
     setPlayerInput(""); setPendingOrders([]);
     setActiveWindow('events');
-    saveGame(newGameState, [...fullHistory, ...newAiEvents]);
+    
+    // SAUVEGARDE AUTOMATIQUE TOUS LES 4 TOURS SEULEMENT
+    if (newGameState.turn % 4 === 0) {
+        persistGame(newGameState, [...fullHistory, ...newAiEvents], aiProvider, tokenCount + (result.tokenUsage || 0), false);
+    }
   };
 
   const handleRegionSelect = (region: string) => {
