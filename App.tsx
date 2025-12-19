@@ -388,6 +388,18 @@ const App: React.FC = () => {
       setIsGlobalLoading(false); 
   };
 
+  const handleContinueAsNewCountry = () => {
+      setGameState(prev => ({
+          ...prev,
+          isGameOver: false,
+          playerCountry: null,
+          ownedTerritories: [],
+          // On garde l'histoire, la date, les territoires neutres, etc.
+      }));
+      setShowStartModal(true);
+      setPendingCountry(null);
+  }
+
   const handleExitApp = () => {
       try { window.close(); } catch (e) {}
       // @ts-ignore
@@ -516,31 +528,26 @@ const App: React.FC = () => {
         setEventQueue([initialEvent]);
         setActiveWindow('events');
         
-        setGameState(prev => {
-            const hasNuke = hasNuclearArsenal(prev.playerCountry!);
-            const hasSpace = hasSpaceProgramInitial(prev.playerCountry!);
-            const stats = getInitialStats(prev.playerCountry!);
-            const isNatoMember = NATO_MEMBERS_2000.includes(prev.playerCountry!);
-            const initialAlliance = isNatoMember ? {
-                name: "OTAN",
-                type: "Alliance Militaire & Nucléaire",
-                members: NATO_MEMBERS_2000,
-                leader: "États-Unis"
-            } : null;
-            
-            const newState = {
-                ...prev,
-                ownedTerritories: [prev.playerCountry!],
-                militaryPower: stats.power,
-                corruption: stats.corruption,
-                hasNuclear: hasNuke,
-                hasSpaceProgram: hasSpace,
-                militaryRank: calculateRank(stats.power),
-                alliance: initialAlliance
-            };
-            saveGame(newState, [], false);
-            return newState;
-        });
+        // Init Stats seulement si Turn 1 (Nouvelle Partie)
+        const stats = getInitialStats(gameState.playerCountry!);
+        const isNatoMember = NATO_MEMBERS_2000.includes(gameState.playerCountry!);
+        const initialAlliance = isNatoMember ? {
+            name: "OTAN",
+            type: "Alliance Militaire & Nucléaire",
+            members: NATO_MEMBERS_2000,
+            leader: "États-Unis"
+        } : null;
+
+        setGameState(prev => ({
+            ...prev,
+            ownedTerritories: [prev.playerCountry!],
+            militaryPower: stats.power,
+            corruption: stats.corruption,
+            hasNuclear: hasNuclearArsenal(prev.playerCountry!),
+            hasSpaceProgram: hasSpaceProgramInitial(prev.playerCountry!),
+            militaryRank: calculateRank(stats.power),
+            alliance: initialAlliance
+        }));
         setFocusCountry(gameState.playerCountry);
     }
   }, [gameState.playerCountry, currentScreen, appMode]);
@@ -728,7 +735,8 @@ const App: React.FC = () => {
         gameState.chaosLevel,
         aiProvider,
         gameState.militaryPower,
-        gameState.alliance
+        gameState.alliance,
+        gameState.neutralTerritories // PASSAGE DES TERRES DÉSOLÉES
     );
 
     if (result.tokenUsage) {
@@ -766,12 +774,12 @@ const App: React.FC = () => {
                 if (!newNeutralTerritories.includes(target)) {
                     newNeutralTerritories.push(target);
                 }
-                showNotification(`Territoire détruit : ${target}`);
+                showNotification(`Territoire détruit/dissous : ${target}`);
             } else if (update.type === 'annexation') {
                 const target = normalizeCountryName(update.targetCountry); 
                 const newOwner = update.newOwner ? normalizeCountryName(update.newOwner) : gameState.playerCountry;
                 
-                newNeutralTerritories = newNeutralTerritories.filter(t => t !== target);
+                newNeutralTerritories = newNeutralTerritories.filter(t => t !== target); // Retirer des neutres si annexé
                 
                 if (newOwnedTerritories.includes(target)) {
                     if (newOwner !== gameState.playerCountry) {
@@ -909,9 +917,9 @@ const App: React.FC = () => {
     // 4. EVENT PENALTIES (Punitions contextuelles)
     const hasWarEvent = newAiEvents.some(e => e.type === 'war');
     const hasAttackKeywords = newAiEvents.some(e => 
-        e.description.toLowerCase().includes('attaque') || 
-        e.description.toLowerCase().includes('invasion') || 
-        e.description.toLowerCase().includes('déclaré la guerre')
+        (e.description || "").toLowerCase().includes('attaque') || 
+        (e.description || "").toLowerCase().includes('invasion') || 
+        (e.description || "").toLowerCase().includes('déclaré la guerre')
     );
     
     // Tension: +50% si annexion ou attaque
@@ -926,7 +934,7 @@ const App: React.FC = () => {
     }
 
     // Militaire
-    const combinedDesc = newAiEvents.map(e => e.description.toLowerCase()).join(' ');
+    const combinedDesc = newAiEvents.map(e => (e.description || '').toLowerCase()).join(' ');
     // -15% si bombardements
     if (combinedDesc.includes('bombarde') || combinedDesc.includes('frappe aérienne')) {
         calcMilitary -= 15;
@@ -958,7 +966,7 @@ const App: React.FC = () => {
     // Check nuclear overrides
     if (!newHasNuclear && finalOrderString.toLowerCase().includes("nucléaire")) {
         const successKeywords = ["réussite", "succès", "opérationnel", "acquis", "développé", "doté"];
-        const aiResponseText = newAiEvents.map(e => e.description.toLowerCase() + " " + e.headline.toLowerCase()).join(" ");
+        const aiResponseText = newAiEvents.map(e => (e.description || "") + " " + e.headline).join(" ").toLowerCase();
         if (successKeywords.some(kw => aiResponseText.includes(kw))) {
             newHasNuclear = true;
             result.nuclearAcquired = true;
@@ -1033,17 +1041,16 @@ const App: React.FC = () => {
         saveGame(newGameState, newHistory, false);
     } else {
         setActiveWindow('none');
-        deleteSave(gameState.gameId);
+        // On ne supprime pas la sauvegarde ici pour permettre au joueur de "continuer en tant qu'autre pays" s'il le souhaite
+        // deleteSave(gameState.gameId); 
     }
   };
 
   const handleRegionSelect = (region: string) => {
-    // Si format "Pays:Province", on ignore simplement car on a supprimé les provinces
-    if (region.includes(':')) {
-        return; 
-    }
+    if (region.includes(':')) return; 
 
-    if (!gameState.playerCountry) {
+    // Si on est en mode "Game Over" ou "Début de partie", on peut sélectionner
+    if (!gameState.playerCountry || (gameState.isGameOver && !gameState.playerCountry)) {
         setPendingCountry(region);
         setShowStartModal(true);
     }
@@ -1051,9 +1058,49 @@ const App: React.FC = () => {
 
   const confirmCountrySelection = () => {
       if (pendingCountry) {
-          setGameState(prev => ({ ...prev, playerCountry: pendingCountry }));
+          // Calcul des stats initiales pour le NOUVEAU pays
+          const stats = getInitialStats(pendingCountry);
+          const isNatoMember = NATO_MEMBERS_2000.includes(pendingCountry);
+          const initialAlliance = isNatoMember ? {
+                name: "OTAN",
+                type: "Alliance Militaire & Nucléaire",
+                members: NATO_MEMBERS_2000,
+                leader: "États-Unis"
+          } : null;
+          
+          setGameState(prev => ({ 
+              ...prev, 
+              playerCountry: pendingCountry,
+              ownedTerritories: [pendingCountry], // On assume possession de base
+              // Mise à jour des stats pour le nouveau pays
+              militaryPower: stats.power,
+              corruption: stats.corruption,
+              economyHealth: 50, // Reset standard
+              popularity: 60, // Reset standard
+              globalTension: prev.globalTension, // On garde la tension mondiale !
+              hasNuclear: hasNuclearArsenal(pendingCountry),
+              hasSpaceProgram: hasSpaceProgramInitial(pendingCountry),
+              alliance: initialAlliance,
+              militaryRank: calculateRank(stats.power),
+              isGameOver: false, // Reset Game Over
+              gameOverReason: null
+          }));
+          
+          // Ajout d'un événement dans l'historique pour marquer le changement
+          const takeoverEvent: GameEvent = {
+              id: `takeover-${Date.now()}`,
+              date: gameState.currentDate.toLocaleDateString('fr-FR'),
+              type: 'world',
+              headline: "Changement de Régime",
+              description: `Suite à la chute du gouvernement précédent, le joueur prend le contrôle de : ${pendingCountry}.`
+          };
+          setFullHistory(prev => [...prev, takeoverEvent]);
+          setEventQueue(prev => [takeoverEvent, ...prev]);
+
           setPendingCountry(null);
           setFocusCountry(pendingCountry);
+          setShowStartModal(false);
+          setActiveWindow('events');
       }
   };
 
@@ -1248,7 +1295,6 @@ const App: React.FC = () => {
 
   // Dashboard et Game modes identiques à l'original, sauf intégration de WorldMap props
   if (appMode === 'portal_dashboard') {
-    // ... (Code Dashboard Identique)
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
               {isGlobalLoading && (
@@ -1260,6 +1306,7 @@ const App: React.FC = () => {
                       <p className="text-xs text-slate-400 mt-2">Récupération depuis le Cloud sécurisé</p>
                   </div>
               )}
+              {isLoadMenuOpen && renderLoadMenuOverlay()}
               <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center sticky top-0 z-20">
                   <div className="flex items-center gap-2">
                       <div className="w-6 h-6 bg-black rounded-full"></div>
@@ -1471,6 +1518,150 @@ const App: React.FC = () => {
             />
         </div>
 
+        {/* UI HUD: visible seulement si la partie est active et pas game over */}
+        {!gameState.isGameOver && gameState.playerCountry && (
+            <>
+                {/* 1. DATE CONTROLS (Bottom Right) */}
+                <DateControls 
+                    currentDate={gameState.currentDate}
+                    turn={gameState.turn}
+                    onNextTurn={handleNextTurn}
+                    isProcessing={gameState.isProcessing}
+                />
+
+                {/* 2. EVENT LOG (Center/Dialog) - Contient aussi l'input des ordres */}
+                <EventLog 
+                    isOpen={activeWindow === 'events'}
+                    onClose={() => toggleWindow('events')}
+                    eventQueue={eventQueue}
+                    onReadEvent={handleReadEvent}
+                    playerAction={playerInput}
+                    setPlayerAction={setPlayerInput}
+                    onAddOrder={handleAddOrder}
+                    pendingOrders={pendingOrders}
+                    isProcessing={gameState.isProcessing}
+                    onGetSuggestions={handleGetSuggestions}
+                    turn={gameState.turn}
+                />
+
+                {/* 3. HISTORY LOG (Dialog) */}
+                <HistoryLog 
+                    isOpen={activeWindow === 'history'}
+                    onClose={() => toggleWindow('history')}
+                    history={fullHistory}
+                />
+
+                {/* 4. CHAT INTERFACE (Dialog) */}
+                <ChatInterface 
+                    isOpen={activeWindow === 'chat'}
+                    onClose={() => toggleWindow('chat')}
+                    playerCountry={gameState.playerCountry}
+                    chatHistory={gameState.chatHistory}
+                    onSendMessage={handleSendChatMessage}
+                    isProcessing={gameState.isProcessing}
+                    allCountries={ALL_COUNTRIES_LIST}
+                    typingParticipants={typingParticipants}
+                    onMarkRead={handleMarkChatRead}
+                />
+
+                {/* 5. ALLIANCE WINDOW (Dialog) */}
+                {gameState.alliance && (
+                    <AllianceWindow 
+                        isOpen={activeWindow === 'alliance'}
+                        onClose={() => toggleWindow('alliance')}
+                        alliance={gameState.alliance}
+                        playerCountry={gameState.playerCountry}
+                    />
+                )}
+                
+                {/* 6. BOTTOM LEFT MENUS (TASKBAR) */}
+                <div className="absolute bottom-6 left-6 z-30 flex flex-col items-start gap-2">
+                    <button 
+                        onClick={() => toggleWindow('events')}
+                        className="bg-white/90 backdrop-blur text-stone-800 px-4 py-2 rounded-xl border border-stone-300 shadow-lg font-bold text-sm hover:bg-white hover:scale-105 transition-all flex items-center gap-2"
+                    >
+                        <span>✍️</span> Ordres / Rapports
+                        {eventQueue.length > 0 && (
+                            <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full animate-pulse">{eventQueue.length}</span>
+                        )}
+                    </button>
+                    
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => toggleWindow('chat')}
+                            className="bg-stone-800 text-white p-3 rounded-xl shadow-lg border border-stone-600 hover:bg-stone-700 hover:scale-105 transition-all relative"
+                            title="Diplomatie"
+                        >
+                            💬
+                            {hasUnreadChat && (
+                                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-bounce"></span>
+                            )}
+                        </button>
+                        <button 
+                            onClick={() => toggleWindow('history')}
+                            className="bg-stone-800 text-white p-3 rounded-xl shadow-lg border border-stone-600 hover:bg-stone-700 hover:scale-105 transition-all"
+                            title="Archives"
+                        >
+                            📚
+                        </button>
+                        {gameState.alliance && (
+                            <button 
+                                onClick={() => toggleWindow('alliance')}
+                                className="bg-blue-800 text-white p-3 rounded-xl shadow-lg border border-blue-600 hover:bg-blue-700 hover:scale-105 transition-all"
+                                title="Alliance"
+                            >
+                                🛡
+                            </button>
+                        )}
+                        <button 
+                            onClick={() => setAppMode('portal_dashboard')}
+                            className="bg-red-900/80 text-white p-3 rounded-xl shadow-lg border border-red-800 hover:bg-red-800 hover:scale-105 transition-all"
+                            title="Quitter vers menu"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                </div>
+
+                {/* 7. TOP STATS BAR */}
+                <div className="absolute top-6 left-6 right-6 z-30 flex justify-between items-start pointer-events-none">
+                     {/* STATS CAPSULE */}
+                     <div className="bg-stone-900/90 backdrop-blur-md text-white p-1 rounded-full border border-stone-700 shadow-2xl flex items-center gap-4 px-4 pointer-events-auto">
+                        <div className="flex items-center gap-2 border-r border-stone-700 pr-4">
+                            <img src={getFlagUrl(gameState.playerCountry) || ''} alt="" className="w-8 h-5 rounded object-cover" />
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-bold text-stone-400 leading-none uppercase">Nation</span>
+                                <span className="text-sm font-bold leading-none">{gameState.playerCountry}</span>
+                            </div>
+                        </div>
+                        
+                        <div className="flex gap-4 text-xs font-mono">
+                            <div className="flex flex-col items-center">
+                                <span className="text-[9px] text-stone-500 uppercase">Tension</span>
+                                <span className={`font-bold ${gameState.globalTension > 75 ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
+                                    {gameState.globalTension}%
+                                </span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                                <span className="text-[9px] text-stone-500 uppercase">Éco</span>
+                                <span className="font-bold text-blue-400">{gameState.economyHealth}%</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                                <span className="text-[9px] text-stone-500 uppercase">Armée</span>
+                                <span className="font-bold text-orange-400">{gameState.militaryPower}%</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                                <span className="text-[9px] text-stone-500 uppercase">Pop</span>
+                                <span className="font-bold text-purple-400">{gameState.popularity}%</span>
+                            </div>
+                        </div>
+                     </div>
+                </div>
+            </>
+        )}
+
+        {/* --- OVERLAYS --- */}
+
         {gameState.isGameOver && (
             <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center animate-fade-in">
                 <div className="bg-red-900/30 border-4 border-red-600 rounded-2xl p-8 max-w-lg w-full shadow-[0_0_50px_rgba(220,38,38,0.5)]">
@@ -1484,22 +1675,34 @@ const App: React.FC = () => {
                     <div className="text-stone-400 text-sm mb-8">
                         Votre mandat s'achève ici, dans les ruines de l'histoire.
                     </div>
-                    <button 
-                        onClick={handleExitToDashboard}
-                        className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-widest rounded shadow-lg transition-transform hover:scale-105 active:scale-95"
-                    >
-                        Retour au Tableau de bord
-                    </button>
+                    
+                    <div className="flex flex-col gap-3">
+                        <button 
+                            onClick={handleContinueAsNewCountry}
+                            className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest rounded shadow-lg transition-transform hover:scale-105 active:scale-95"
+                        >
+                            Incarner une autre nation
+                        </button>
+                        <button 
+                            onClick={handleExitToDashboard}
+                            className="px-8 py-3 bg-stone-700 hover:bg-stone-600 text-stone-300 font-bold uppercase tracking-widest rounded shadow transition-colors"
+                        >
+                            Quitter
+                        </button>
+                    </div>
                 </div>
             </div>
         )}
 
         {showStartModal && !gameState.playerCountry && !pendingCountry && (
-            <div className="absolute inset-0 z-50 flex flex-col items-center justify-start pt-16 pointer-events-none animate-fade-in p-4">
+            <div className="absolute inset-0 z-50 flex flex-col items-center justify-start pt-24 pointer-events-none animate-fade-in p-4">
                 <div className="bg-white/95 backdrop-blur-md p-4 rounded-xl max-w-sm w-full shadow-2xl border-2 border-stone-300 text-center pointer-events-auto transform scale-90">
                     <div className="flex justify-between items-start mb-2">
                         <h2 className="text-lg font-bold text-stone-800">Sélectionnez votre nation</h2>
-                        <button onClick={() => setShowStartModal(false)} className="text-stone-400 hover:text-stone-600 font-bold">✕</button>
+                        {/* On désactive la fermeture si on est au tout début ou après game over pour forcer le choix */}
+                        {gameState.turn > 1 && !gameState.isGameOver ? (
+                            <button onClick={() => setShowStartModal(false)} className="text-stone-400 hover:text-stone-600 font-bold">✕</button>
+                        ) : null}
                     </div>
                     <div className="space-y-2">
                         <p className="text-sm text-stone-600">
@@ -1540,312 +1743,10 @@ const App: React.FC = () => {
                 </div>
             </div>
         )}
-
-        {activeWindow !== 'none' && (
-            <div 
-                className="absolute inset-0 z-40 bg-black/10" 
-                onClick={() => setActiveWindow('none')}
-            />
-        )}
-
-        <EventLog 
-            isOpen={activeWindow === 'events'}
-            onClose={() => setActiveWindow('none')}
-            eventQueue={eventQueue}
-            onReadEvent={handleReadEvent}
-            playerAction={playerInput}
-            setPlayerAction={setPlayerInput}
-            onAddOrder={handleAddOrder}
-            pendingOrders={pendingOrders}
-            isProcessing={gameState.isProcessing}
-            onGetSuggestions={handleGetSuggestions}
-            turn={gameState.turn}
-        />
-
-        <HistoryLog
-            isOpen={activeWindow === 'history'}
-            onClose={() => setActiveWindow('none')}
-            history={fullHistory}
-        />
-
-        <ChatInterface
-            isOpen={activeWindow === 'chat'}
-            onClose={() => toggleWindow('chat')}
-            playerCountry={gameState.playerCountry || "Moi"}
-            chatHistory={gameState.chatHistory}
-            onSendMessage={handleSendChatMessage}
-            isProcessing={gameState.isProcessing}
-            allCountries={ALL_COUNTRIES_LIST}
-            typingParticipants={typingParticipants}
-            onMarkRead={handleMarkChatRead}
-        />
-
-        {gameState.alliance && (
-            <AllianceWindow
-                isOpen={activeWindow === 'alliance'}
-                onClose={() => setActiveWindow('none')}
-                alliance={gameState.alliance}
-                playerCountry={gameState.playerCountry || ""}
-            />
-        )}
-
-        {gameState.playerCountry && !gameState.isGameOver && (
-            <>
-                <div className="absolute top-4 left-4 z-20 flex gap-4 bg-stone-900/90 p-3 rounded-lg border border-stone-700 shadow-xl backdrop-blur-md">
-                    <div className="flex flex-col gap-1 w-20">
-                        <span className="text-[10px] uppercase text-stone-400 font-bold">Tension</span>
-                        <div className="w-full h-1.5 bg-stone-700 rounded-full overflow-hidden">
-                            <div className={`h-full ${gameState.globalTension > 75 ? 'bg-red-500 animate-pulse' : 'bg-orange-400'}`} style={{width: `${gameState.globalTension}%`}}></div>
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-1 w-20">
-                        <span className="text-[10px] uppercase text-stone-400 font-bold">Économie</span>
-                        <div className="w-full h-1.5 bg-stone-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500" style={{width: `${gameState.economyHealth}%`}}></div>
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-1 w-20">
-                        <span className="text-[10px] uppercase text-stone-400 font-bold">Popularité</span>
-                        <div className="w-full h-1.5 bg-stone-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-pink-500" style={{width: `${gameState.popularity}%`}}></div>
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-1 w-20">
-                        <span className="text-[10px] uppercase text-stone-400 font-bold">Corruption</span>
-                        <div className="w-full h-1.5 bg-stone-700 rounded-full overflow-hidden">
-                            <div className={`h-full ${gameState.corruption > 50 ? 'bg-purple-600' : 'bg-purple-400'}`} style={{width: `${gameState.corruption}%`}}></div>
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-1 w-20">
-                        <span className="text-[10px] uppercase text-stone-400 font-bold">Militaire</span>
-                        <div className="w-full h-1.5 bg-stone-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500" style={{width: `${gameState.militaryPower}%`}}></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="absolute top-4 right-4 z-20 flex flex-col items-end gap-1 pointer-events-none">
-                    <div className="flex items-center gap-2 pointer-events-auto">
-                        <div className="bg-black/50 text-emerald-400 px-3 py-1 rounded-full text-xs font-mono font-bold border border-emerald-500/30 backdrop-blur-md shadow-sm">
-                            🪙 {tokenCount}
-                        </div>
-                        {user && (
-                            <div className="w-9 h-9 rounded-full border-2 border-emerald-500 overflow-hidden shadow-lg" title={user.displayName}>
-                                {user.photoURL ? (
-                                    <img src={user.photoURL} alt="User" className="w-full h-full object-cover" />
-                                ) : (
-                                    <div className="w-full h-full bg-stone-800 text-white flex items-center justify-center font-bold">
-                                        {user.email ? user.email[0].toUpperCase() : 'U'}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                        <button 
-                            onClick={() => setIsSettingsOpen(true)}
-                            className="flex items-center gap-2 bg-stone-900/90 text-white pl-2 pr-4 py-2 rounded-lg border border-stone-700 shadow-xl backdrop-blur-md hover:bg-stone-800 transition-colors h-9"
-                        >
-                            <div className="w-6 h-4 bg-stone-700 relative overflow-hidden rounded shadow-sm">
-                                <img src={getFlagUrl(gameState.playerCountry) || `https://flagcdn.com/w40/un.png`} 
-                                    onError={(e) => (e.currentTarget.style.display = 'none')}
-                                    className="object-cover w-full h-full" alt="" />
-                            </div>
-                            <span className="font-bold text-sm truncate max-w-[150px]">{gameState.playerCountry}</span>
-                        </button>
-                    </div>
-                    {(gameState.hasNuclear || gameState.hasSpaceProgram || !isCountryLandlocked(gameState.playerCountry) || (gameState.alliance?.name === "OTAN")) && (
-                        <div className="pointer-events-auto flex gap-2 bg-black/60 p-1.5 rounded-lg border border-white/10 backdrop-blur-md">
-                            {gameState.hasNuclear && (
-                                <div 
-                                    title="Puissance Nucléaire"
-                                    className="text-sm text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)] animate-pulse"
-                                >
-                                    ☢️
-                                </div>
-                            )}
-                            {gameState.alliance?.name === "OTAN" && (
-                                <div 
-                                    title="Membre OTAN"
-                                    className="text-sm text-blue-400 drop-shadow-[0_0_5px_rgba(59,130,246,0.8)]"
-                                >
-                                    🛡️
-                                </div>
-                            )}
-                            {gameState.hasSpaceProgram && (
-                                <div 
-                                    title="Programme Spatial Actif"
-                                    className="text-sm text-blue-400 drop-shadow-[0_0_5px_rgba(96,165,250,0.8)]"
-                                >
-                                    🚀
-                                </div>
-                            )}
-                            {!isCountryLandlocked(gameState.playerCountry) && (
-                                <div 
-                                    title="Accès Maritime"
-                                    className="text-sm text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,1)]"
-                                >
-                                    ⚓
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                <div className="absolute bottom-6 left-6 z-20 flex gap-4">
-                    <button 
-                        onClick={() => toggleWindow('events')}
-                        className={`w-14 h-14 rounded-full shadow-xl border-2 transition-transform flex items-center justify-center hover:scale-105 active:scale-95 ${
-                            activeWindow === 'events' 
-                            ? 'bg-blue-50 border-blue-400 text-blue-600' 
-                            : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
-                        }`}
-                        title="Ordres & Événements"
-                    >
-                        <span className="text-2xl">📝</span>
-                    </button>
-                    <div className="relative">
-                        <button 
-                            onClick={() => toggleWindow('chat')}
-                            className={`w-14 h-14 rounded-full shadow-xl border-2 transition-transform flex items-center justify-center hover:scale-105 active:scale-95 ${
-                                activeWindow === 'chat' 
-                                ? 'bg-blue-50 border-blue-400 text-blue-600' 
-                                : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
-                            }`}
-                            title="Diplomatie"
-                        >
-                            <span className="text-2xl">💬</span>
-                        </button>
-                        {hasUnreadChat && (
-                            <div className="absolute top-0 right-0 w-4 h-4 bg-red-500 border-2 border-white rounded-full animate-pulse"></div>
-                        )}
-                    </div>
-                    <button 
-                        onClick={() => toggleWindow('history')}
-                        className={`w-14 h-14 rounded-full shadow-xl border-2 transition-transform flex items-center justify-center hover:scale-105 active:scale-95 ${
-                            activeWindow === 'history' 
-                            ? 'bg-blue-50 border-blue-400 text-blue-600' 
-                            : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
-                        }`}
-                        title="Archives"
-                    >
-                        <span className="text-2xl">📚</span>
-                    </button>
-                    {gameState.alliance && (
-                        <button 
-                            onClick={() => toggleWindow('alliance')}
-                            className={`w-14 h-14 rounded-full shadow-xl border-2 transition-transform flex items-center justify-center hover:scale-105 active:scale-95 animate-fade-in ${
-                                activeWindow === 'alliance' 
-                                ? 'bg-blue-50 border-blue-400 text-blue-600' 
-                                : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
-                            }`}
-                            title="Alliance"
-                        >
-                            <span className="text-2xl">🤝</span>
-                        </button>
-                    )}
-                </div>
-            </>
-        )}
-
-        {isSettingsOpen && (
-            <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-stone-100 rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-stone-300 overflow-y-auto max-h-[90vh]">
-                    <h3 className="font-bold text-xl mb-4 text-stone-800 flex items-center gap-2">
-                        <span>⚙️</span> Paramètres
-                    </h3>
-                    {user && (
-                        <div className="mb-4 bg-white p-3 rounded-lg flex items-center gap-3 shadow-sm border border-stone-200">
-                            {user.photoURL ? (
-                                <img src={user.photoURL} alt="" className="w-10 h-10 rounded-full" />
-                            ) : (
-                                <div className="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold">
-                                    {user.email ? user.email[0].toUpperCase() : 'U'}
-                                </div>
-                            )}
-                            <div className="flex-1">
-                                <div className="text-xs font-bold text-stone-800">{user.displayName || user.email}</div>
-                                <div className="text-[10px] text-stone-500">{user.email}</div>
-                            </div>
-                            <button onClick={handleLogout} className="text-red-500 font-bold text-xs hover:bg-red-50 p-1 rounded">Sortir</button>
-                        </div>
-                    )}
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-xs font-bold uppercase text-stone-500 mb-2">Moteur IA</label>
-                            <div className="flex bg-stone-200 rounded-lg p-1">
-                                <button 
-                                    onClick={() => setAiProvider('gemini')}
-                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'gemini' ? 'bg-white shadow text-blue-600' : 'text-stone-500'}`}
-                                >
-                                    Google
-                                </button>
-                                <button 
-                                    onClick={() => setAiProvider('groq')}
-                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'groq' ? 'bg-white shadow text-orange-600' : 'text-stone-500'}`}
-                                >
-                                    Groq
-                                </button>
-                                <button 
-                                    onClick={() => setAiProvider('huggingface')}
-                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'huggingface' ? 'bg-white shadow text-yellow-600' : 'text-stone-500'}`}
-                                >
-                                    HF
-                                </button>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold uppercase text-stone-500 mb-2">Niveau de Chaos (IA Behavior)</label>
-                            <div className="grid grid-cols-2 gap-2">
-                                {['peaceful', 'normal', 'high', 'chaos'].map((level) => (
-                                    <button
-                                        key={level}
-                                        onClick={() => setGameState(prev => ({...prev, chaosLevel: level as ChaosLevel}))}
-                                        className={`py-2 px-2 text-xs font-bold rounded-lg border-2 transition-all capitalize ${
-                                            gameState.chaosLevel === level 
-                                            ? level === 'chaos' ? 'bg-red-100 border-red-500 text-red-600' : 'bg-blue-100 border-blue-500 text-blue-600'
-                                            : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
-                                        }`}
-                                    >
-                                        {level === 'peaceful' ? '🕊️ Pacifique' : 
-                                        level === 'normal' ? '⚖️ Standard' : 
-                                        level === 'high' ? '🔥 Tendu' : '💀 Chaos'}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="pt-4 border-t border-stone-200 flex flex-col gap-2">
-                            <button 
-                                onClick={() => { setIsSettingsOpen(false); saveGame(gameState, fullHistory, true); }} 
-                                className="w-full py-3 text-white font-bold rounded-lg shadow flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500"
-                            >
-                                ☁️ Sauvegarder (Cloud)
-                            </button>
-                            <button onClick={() => { setIsSettingsOpen(false); openLoadMenu(); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow">Charger une partie</button>
-                            <button onClick={() => setIsSettingsOpen(false)} className="w-full py-3 bg-stone-800 text-white font-bold rounded-lg">Reprendre</button>
-                            <button onClick={handleExitToDashboard} className="w-full py-3 bg-stone-200 text-stone-600 font-bold rounded-lg">Quitter vers Tableau de bord</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )}
-        {isLoadMenuOpen && renderLoadMenuOverlay()}
-        {notification && (
-            <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-stone-800 text-white px-6 py-2 rounded-full shadow-xl z-50 animate-fade-in-down text-sm font-bold flex items-center gap-2">
-                <span className="text-emerald-400">✓</span> {notification}
-            </div>
-        )}
-        {gameState.playerCountry && !gameState.isGameOver && (
-            <DateControls 
-                currentDate={gameState.currentDate}
-                turn={gameState.turn}
-                onNextTurn={handleNextTurn}
-                isProcessing={gameState.isProcessing}
-            />
-        )}
         </div>
     );
   }
-
   return null;
-};
+}
 
 export default App;

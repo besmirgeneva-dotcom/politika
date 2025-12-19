@@ -85,18 +85,14 @@ const createDotIcon = (color: string, labels: string[], type: string, showLabel:
         ${showLabel ? `
         <div style="
           position: absolute; 
-          left: 8px; top: -6px; 
+          left: 10px; top: -6px; 
           white-space: nowrap; 
-          font-size: 8px;
+          font-size: 10px;
           font-weight: bold; 
-          background-color: rgba(0,0,0,0.8); 
           color: white; 
-          padding: 2px 4px; 
-          border-radius: 3px;
+          text-shadow: 0px 0px 3px black, 0px 0px 5px black;
           pointer-events: none;
-          text-shadow: 0 0 2px black;
           z-index: 10;
-          border: 1px solid ${color};
           display: flex;
           flex-direction: column;
         ">${labelHtml}</div>
@@ -202,7 +198,7 @@ const LABEL_OVERRIDES: Record<string, [number, number]> = {
 };
 
 // --- MAP LABELS COMPONENT ---
-const MapLabels = ({ zoom, visibleCountries, playerCountry }: { zoom: number, visibleCountries: any[], playerCountry: string | null }) => {
+const MapLabels = ({ zoom, visibleCountries, playerCountry, neutralTerritories }: { zoom: number, visibleCountries: any[], playerCountry: string | null, neutralTerritories: string[] }) => {
     // Affichage progressif selon le zoom pour éviter la surcharge
     // Zoom 2-3 : Uniquement les grands pays
     // Zoom 4+ : Tout le monde
@@ -219,6 +215,11 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry }: { zoom: number, vi
 
                 const isPlayer = name === playerCountry;
                 const isMajor = MAJOR_POWERS.includes(name);
+                
+                // Remplacer le nom par "PAYS VIDE" si dans neutralTerritories
+                const isNeutral = neutralTerritories.includes(name);
+                const displayName = isNeutral ? "PAYS VIDE" : name;
+                const displayColor = isNeutral ? '#b91c1c' : (isPlayer ? '#15803d' : '#374151'); // Rouge foncé pour vide
 
                 // LOGIQUE D'AFFICHAGE
                 // Zoom < 3 : Seulement les très grands
@@ -236,9 +237,9 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry }: { zoom: number, vi
                         icon={L.divIcon({
                             className: 'bg-transparent',
                             html: `<div style="
-                                color: ${isPlayer ? '#15803d' : '#374151'};
+                                color: ${displayColor};
                                 text-shadow: 0 0 3px rgba(255,255,255,0.9); 
-                                font-weight: ${isPlayer ? '900' : 'bold'}; 
+                                font-weight: ${isPlayer || isNeutral ? '900' : 'bold'}; 
                                 font-size: ${fontSize};
                                 text-transform: uppercase;
                                 text-align: center;
@@ -248,7 +249,7 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry }: { zoom: number, vi
                                 font-family: 'Segoe UI', sans-serif;
                                 opacity: 0.95;
                                 letter-spacing: 0.5px;
-                            ">${name}</div>`
+                            ">${displayName}</div>`
                         })}
                     />
                 );
@@ -415,7 +416,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     } else if (ownedTerritories.includes(countryName)) {
         fillColor = "#4ade80"; // Vert annexe
     } else if (neutralTerritories.includes(countryName)) {
-        fillColor = "#ef4444"; // Rouge
+        fillColor = "#7f1d1d"; // Rouge foncé (Terre brulée/Détruite)
     }
 
     return {
@@ -514,11 +515,12 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         {/* Base Layer */}
         <GeoJSON data={geoData} style={style} onEachFeature={onEachFeature} />
 
-        {/* Labels des Pays */}
+        {/* Labels des Pays (Mise à jour avec neutralTerritories) */}
         <MapLabels 
             zoom={zoom} 
             visibleCountries={centers} 
             playerCountry={playerCountry}
+            neutralTerritories={neutralTerritories}
         />
         
         {/* Capitales */}
@@ -526,16 +528,22 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
 
         {/* Entités de carte (Bases/Défenses) */}
         {mapEntities.map((entity) => {
+             // RÈGLE : Affichage des points (dot) à partir du Zoom 6
+             if (zoom < 6) return null;
+
              const position = getMarkerPosition(entity);
              if (!position) return null;
              
+             // RÈGLE : Affichage du texte à partir du Zoom 8
+             const showLabel = zoom >= 8;
+
              return (
                 <Marker
                     key={entity.id}
                     position={position}
-                    icon={createDotIcon(getEntityColor(entity.type), [], entity.type, zoom > 4)}
+                    icon={createDotIcon(getEntityColor(entity.type), [], entity.type, showLabel)}
                 >
-                    {zoom > 4 && <Popup>{entity.label || getEntityLabel(entity.type)}</Popup>}
+                    <Popup>{entity.label || getEntityLabel(entity.type)}</Popup>
                 </Marker>
              );
         })}
