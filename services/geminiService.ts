@@ -220,10 +220,11 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
     try {
         if (!HUGGINGFACE_API_KEY) throw new Error("No Hugging Face Key");
         
-        // Using Phi-3.5-mini-instruct which is generally available on free inference API and good with JSON
-        const MODEL_ID = "microsoft/Phi-3.5-mini-instruct"; 
+        // Using Qwen2.5-7B-Instruct - generally reliable and high quality for JSON
+        const MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"; 
         
-        const fullPrompt = `<|system|>\n${system}\n<|end|>\n<|user|>\n${prompt}\n<|end|>\n<|assistant|>\n`;
+        // ChatML format for Qwen
+        const fullPrompt = `<|im_start|>system\n${system}<|im_end|>\n<|im_start|>user\n${prompt}<|im_end|>\n<|im_start|>assistant\n`;
 
         const response = await fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
             method: "POST",
