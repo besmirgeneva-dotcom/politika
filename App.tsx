@@ -119,7 +119,6 @@ const App: React.FC = () => {
   const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
   const [isSyncing, setIsSyncing] = useState(true); // Default to true until listener loads
   const [isGlobalLoading, setIsGlobalLoading] = useState(false); // NEW: Global loading state for heavy ops
-  const [tokenCount, setTokenCount] = useState(0); // NEW: Token usage tracker
 
   // Bug Report State
   const [showBugReportModal, setShowBugReportModal] = useState(false);
@@ -499,7 +498,6 @@ const App: React.FC = () => {
       setShowStartModal(true);
       setAppMode('game_active');
       setCurrentScreen('splash'); 
-      setTokenCount(0); // Reset tokens
   };
 
   // --- GAMEPLAY EFFECTS ---
@@ -568,7 +566,7 @@ const App: React.FC = () => {
       return await getStrategicSuggestions(gameState.playerCountry, fullHistory, aiProvider);
   }
 
-  // --- DIPLOMATIC CHAT HANDLER (UPDATED FOR BATCHING & GROUP TARGETING) ---
+  // --- DIPLOMATIC CHAT HANDLER (UPDATED FOR BATCHING) ---
   const handleSendChatMessage = async (targets: string[], message: string) => {
       if (!gameState.playerCountry) return;
 
@@ -599,6 +597,8 @@ const App: React.FC = () => {
       const updatedHistoryForContext = [...gameState.chatHistory, userMsg];
 
       try {
+        // STRATEGIE 1: BATCHING (Token Saving)
+        // On envoie une seule requête pour tous les destinataires, au lieu de map()
         const aiResponses = await sendDiplomaticMessage(
             gameState.playerCountry!,
             targets,
@@ -608,30 +608,16 @@ const App: React.FC = () => {
             aiProvider
         );
 
-        let totalUsage = 0;
+        const newMessages: ChatMessage[] = aiResponses.map(resp => ({
+            id: `msg-${Date.now()}-${resp.sender}`,
+            sender: 'ai',
+            senderName: resp.sender,
+            targets: targets,
+            text: resp.text,
+            timestamp: Date.now() + Math.floor(Math.random() * 500),
+            isRead: false
+        }));
 
-        const newMessages: ChatMessage[] = aiResponses.map(resp => {
-            totalUsage += resp.usage;
-            
-            // LOGIQUE DE CIBLAGE GROUPE CORRIGÉE:
-            // Si l'IA répond (ex: France), elle doit cibler [Joueur + Les autres destinataires originaux] - Elle-même.
-            // Ex: Joueur écrit à [France, Allemagne]. 
-            // France répond. Cibles de France = [Joueur, Allemagne].
-            const allParticipants = [gameState.playerCountry!, ...targets];
-            const responseTargets = allParticipants.filter(p => p !== resp.sender).map(normalizeCountryName);
-
-            return {
-                id: `msg-${Date.now()}-${resp.sender}`,
-                sender: 'ai',
-                senderName: resp.sender,
-                targets: responseTargets,
-                text: resp.text,
-                timestamp: Date.now() + Math.floor(Math.random() * 500),
-                isRead: false
-            };
-        });
-
-        setTokenCount(prev => prev + totalUsage);
         setTypingParticipants([]);
 
         setGameState(prev => ({
@@ -748,10 +734,6 @@ const App: React.FC = () => {
         gameState.alliance
     );
 
-    if (result.tokenUsage) {
-        setTokenCount(prev => prev + result.tokenUsage!);
-    }
-
     const nextDate = new Date(gameState.currentDate);
     if (result.timeIncrement === 'day') nextDate.setDate(nextDate.getDate() + 1);
     else if (result.timeIncrement === 'year') nextDate.setFullYear(nextDate.getFullYear() + 1);
@@ -820,22 +802,13 @@ const App: React.FC = () => {
             } else if (update.type === 'remove_entity') {
                 newEntities = newEntities.filter(e => e.id !== update.entityId && e.label !== update.label);
             } else if (update.type === 'build_base' || update.type === 'build_defense') {
-                const entityType: MapEntityType = update.type === 'build_base' ? 'military_base' : 'defense_system';
-                
-                // FIX LABEL MAP: Si le label fourni par l'IA est "build_base" (erreur fréquente), on le remplace
-                let displayLabel = update.label;
-                const badLabels = ['build_base', 'build_defense', 'defense_system', 'military_base'];
-                if (!displayLabel || badLabels.includes(displayLabel)) {
-                     displayLabel = entityType === 'military_base' ? 'Base Avancée' : 'Système Défensif';
-                }
-
                 newEntities.push({
                     id: `ent-${Date.now()}-${Math.random()}`,
-                    type: entityType,
+                    type: update.type as MapEntityType,
                     country: normalizeCountryName(update.targetCountry), // Normalisation ici aussi
                     lat: update.lat || 0,
                     lng: update.lng || 0,
-                    label: displayLabel
+                    label: update.label
                 });
             }
         }
@@ -924,34 +897,29 @@ const App: React.FC = () => {
     setFullHistory(newHistory);
 
     // --- APPLY NATURAL DRIFT (GAUGE DYNAMICS) ---
-    // Logique d'ENTROPIE : Plus on est haut, plus on a de chance de baisser naturellement
-    // Cela force le joueur à agir pour maintenir ses stats
+    // If the AI is lazy and returns 0, we sometimes add a small random fluctuation
+    // to keep the world feeling alive (Market volatility, Polls errors, etc.)
     const applyNaturalDrift = (aiValue: number, currentValue: number) => {
-        let drift = 0;
-
-        // Entropie naturelle (si pas de mouvement de l'IA)
-        if (aiValue === 0) {
-             // Si stat > 50, 40% de chance de -1 (déclin naturel)
-             if (currentValue > 50 && Math.random() > 0.6) drift = -1;
-             // Si stat > 80, 60% de chance de -2 (plus dur de rester au sommet)
-             if (currentValue > 80 && Math.random() > 0.4) drift = -2;
+        if (aiValue !== 0) return Math.max(0, Math.min(100, currentValue + aiValue));
+        
+        // 30% chance of drift if AI says 0
+        if (Math.random() > 0.7) {
+            const drift = Math.random() > 0.5 ? 1 : -1;
+            return Math.max(0, Math.min(100, currentValue + drift));
         }
-
-        return Math.max(0, Math.min(100, currentValue + aiValue + drift));
+        return currentValue;
     };
 
     const newGlobalTension = applyNaturalDrift(result.globalTensionChange, gameState.globalTension);
     const newEconomyHealth = applyNaturalDrift(result.economyHealthChange, gameState.economyHealth);
     const newPopularity = applyNaturalDrift(result.popularityChange || 0, gameState.popularity);
     
-    // Corruption monte naturellement si on ne fait rien
+    // Military and Corruption usually stay more stable, so we trust AI more there, but allow small drift
+    // exception: Corruption tends to creep up naturally if not fought
     const corruptionDrift = result.corruptionChange === 0 && Math.random() > 0.8 ? 1 : result.corruptionChange || 0;
     const newCorruption = Math.max(0, Math.min(100, gameState.corruption + corruptionDrift));
     
-    // Militaire est plus stable, mais coûte cher à maintenir si très haut
-    let milDrift = result.militaryPowerChange;
-    if (gameState.militaryPower > 90 && milDrift === 0 && Math.random() > 0.7) milDrift = -1;
-    const newMilitaryPower = Math.max(0, Math.min(100, gameState.militaryPower + milDrift));
+    const newMilitaryPower = Math.max(0, Math.min(100, gameState.militaryPower + result.militaryPowerChange));
     
     let newHasSpaceProgram = gameState.hasSpaceProgram;
     if (result.spaceProgramActive === true) {
@@ -1432,10 +1400,6 @@ const App: React.FC = () => {
 
                 <div className="absolute top-4 right-4 z-20 flex flex-col items-end gap-1 pointer-events-none">
                     <div className="flex items-center gap-2 pointer-events-auto">
-                        <div className="bg-black/50 backdrop-blur-md px-2 py-1 rounded text-[10px] text-emerald-400 font-mono border border-emerald-900/50 shadow mr-2">
-                             TOKEN: {tokenCount}
-                        </div>
-
                         {user && (
                             <div className="w-9 h-9 rounded-full border-2 border-emerald-500 overflow-hidden shadow-lg" title={user.displayName}>
                                 {user.photoURL ? (

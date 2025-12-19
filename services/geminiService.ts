@@ -9,11 +9,6 @@ const HUGGINGFACE_API_KEY = process.env.VITE_HUGGINGFACE_API_KEY || "";
 
 export type AIProvider = 'gemini' | 'groq' | 'huggingface';
 
-// Helper pour estimer les tokens (approximation 1 token ~= 4 chars)
-const estimateTokens = (input: string, output: string): number => {
-    return Math.ceil((input.length + output.length) / 4);
-};
-
 // --- OPTIMIZATION: MINIFIED SCHEMA KEYS ---
 const MINIFIED_SCHEMA = {
     type: Type.OBJECT,
@@ -95,10 +90,9 @@ const MINIFIED_SCHEMA = {
 };
 
 // Map the minified JSON back to the full SimulationResponse for the app
-const mapMinifiedToFull = (min: any, tokens: number = 0): SimulationResponse => {
+const mapMinifiedToFull = (min: any): SimulationResponse => {
     return {
         timeIncrement: min.ti,
-        tokenUsage: tokens,
         events: min.ev?.map((e: any) => ({
             type: e.t,
             headline: e.h,
@@ -184,10 +178,10 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 // --- SYSTEM INSTRUCTIONS ---
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Règles:
-1. STATS: L'entropie est forte. Si le joueur ne fait rien, Popularité (po) et Économie (ec) doivent baisser (-2 à -4). Tensions (gt) montent si inaction. Ne laisse jamais à 0.
-2. CARTE(mu): Si 'annexation', 'no' (newOwner) OBLIGATOIRE.
-3. LABELS: Si 'build_base'/'build_defense', le champ 'lbl' DOIT être un vrai nom (ex: "Fort Alpha", "Mur Ouest", "Base 51"), JAMAIS "build_base".
-4. DIPLOMATIE: Si message de groupe, réponds à tous.
+1. STATS (gt,ec,mi,po,co): DOIVENT CHANGER à chaque tour. Ne laisse jamais tout à 0. Ajoute de la volatilité (-3 à +3) même sans événement majeur.
+2. CARTE(mu): 'annexation', 'build_base', 'dissolve'. IMPORTANT: Si 'annexation', fournis TOUJOURS 'no' (newOwner).
+3. INFRA(iu): Civil seulement.
+4. ACTION: Arcade. Si action agressive, tension (gt) doit monter.
 5. FORMAT: JSON minifié uniquement.
 `;
 
@@ -294,8 +288,7 @@ export const simulateTurn = async (
   if (provider === 'groq' && GROQ_API_KEY) {
       try {
           const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, null);
-          const cost = estimateTokens(prompt, jsonStr);
-          return mapMinifiedToFull(JSON.parse(jsonStr), cost);
+          return mapMinifiedToFull(JSON.parse(jsonStr));
       } catch (e) { console.warn("Groq fail, fallback Gemini", e); }
   } 
   
@@ -303,8 +296,7 @@ export const simulateTurn = async (
       try {
           const sys = SYSTEM_INSTRUCTION + " IMPORTANT: Repond uniquement en JSON valide minifié.";
           const jsonStr = await callHuggingFace(prompt, sys);
-          const cost = estimateTokens(prompt, jsonStr);
-          return mapMinifiedToFull(JSON.parse(jsonStr), cost);
+          return mapMinifiedToFull(JSON.parse(jsonStr));
       } catch (e) { console.warn("HF fail, fallback Gemini", e); }
   }
 
@@ -313,10 +305,9 @@ export const simulateTurn = async (
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: MINIFIED_SCHEMA,
-          temperature: 0.9, 
+          temperature: 0.9, // Higher temp for more variance
       });
-      const cost = estimateTokens(prompt, response.text);
-      return mapMinifiedToFull(JSON.parse(response.text), cost);
+      return mapMinifiedToFull(JSON.parse(response.text));
   } catch (error) { 
       console.error("Gemini Error", error);
       return getFallbackResponse(); 
@@ -330,14 +321,8 @@ export const sendDiplomaticMessage = async (
     history: ChatMessage[],
     context: any,
     provider: AIProvider = 'gemini'
-): Promise<{ sender: string, text: string, usage: number }[]> => {
+): Promise<{ sender: string, text: string }[]> => {
     
-    // On extrait les participants UNIQUES de l'historique récent pour donner le contexte du groupe
-    const uniqueParticipants = Array.from(new Set([
-        playerCountry, 
-        ...targets
-    ])).join(',');
-
     const conv = history
         .filter(msg => targets.includes(msg.senderName) || (msg.sender === 'player' && msg.targets.some(t => targets.includes(t))))
         .slice(-3)
@@ -345,11 +330,10 @@ export const sendDiplomaticMessage = async (
         .join('|');
 
     const prompt = `
-    Groupe:${uniqueParticipants}.
+    Role:${targets.join(',')}.
     Moi:${playerCountry}.
     Chat:${conv}
     Msg:"${message}"
-    Réponds en tant que pays ciblé(s).
     JSON minifié:[{"s":"Pays","t":"Court"}]
     `;
 
@@ -362,15 +346,12 @@ export const sendDiplomaticMessage = async (
         }
     };
 
-    const mapResponse = (raw: any, usage: number) => {
-        const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
-        return arr.map((r: any) => ({ sender: r.s, text: r.t, usage }));
-    };
-
     if (provider === 'groq' && GROQ_API_KEY) {
         try {
             const jsonStr = await callGroq(prompt, "Tu es chef d'état. Repond JSON: [{'s':'Pays','t':'Message'}]", true);
-            return mapResponse(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
+            const raw = JSON.parse(jsonStr);
+            const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
+            return arr.map((r: any) => ({ sender: r.s, text: r.t }));
         } catch (e) { console.warn("Groq fail"); }
     }
 
@@ -378,7 +359,9 @@ export const sendDiplomaticMessage = async (
         try {
             const sys = "Tu es chef d'état. Repond uniquement en JSON valide: [{'s':'Pays','t':'Message'}]";
             const jsonStr = await callHuggingFace(prompt, sys);
-            return mapResponse(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
+            const raw = JSON.parse(jsonStr);
+            const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
+            return arr.map((r: any) => ({ sender: r.s, text: r.t }));
         } catch (e) { console.warn("HF fail"); }
     }
     
@@ -389,24 +372,24 @@ export const sendDiplomaticMessage = async (
             temperature: 0.7 
         });
         const raw = JSON.parse(response.text);
-        return mapResponse(raw, estimateTokens(prompt, response.text));
+        return raw.map((r: any) => ({ sender: r.s, text: r.t })) || [];
     } catch (e) { 
-        return [{ sender: targets[0], text: "...", usage: 0 }]; 
+        return [{ sender: targets[0], text: "..." }]; 
     }
 }
 
 // Fallback dynamic pour ne pas figer les stats si l'API échoue
 const getFallbackResponse = (): SimulationResponse => {
-    // En cas d'erreur, on punit légèrement le joueur (Entropie)
+    // Random fluctuation between -2 and +2
+    const r = () => Math.floor(Math.random() * 5) - 2;
     return {
         timeIncrement: 'day',
         events: [{ type: "world", headline: "Silence Radio", description: "Aucune information majeure reçue ce jour." }],
-        globalTensionChange: 0, 
-        economyHealthChange: -1, 
+        globalTensionChange: r(), 
+        economyHealthChange: r(), 
         militaryPowerChange: 0, 
-        popularityChange: -1, 
-        corruptionChange: 0,
-        tokenUsage: 0
+        popularityChange: r(), 
+        corruptionChange: 0
     };
 };
 

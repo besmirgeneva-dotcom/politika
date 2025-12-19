@@ -68,7 +68,6 @@ export interface GameState {
 
 export interface SimulationResponse {
   timeIncrement: 'day' | 'month' | 'year';
-  tokenUsage?: number; // NOUVEAU: Compteur de tokens estimés
   events: {
     type: 'world' | 'crisis' | 'economy' | 'war' | 'alliance';
     headline: string;
