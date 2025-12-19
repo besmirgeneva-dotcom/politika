@@ -882,30 +882,11 @@ const App: React.FC = () => {
 
     setFullHistory(newHistory);
 
-    // --- APPLY NATURAL DRIFT (GAUGE DYNAMICS) ---
-    // If the AI is lazy and returns 0, we sometimes add a small random fluctuation
-    // to keep the world feeling alive (Market volatility, Polls errors, etc.)
-    const applyNaturalDrift = (aiValue: number, currentValue: number) => {
-        if (aiValue !== 0) return Math.max(0, Math.min(100, currentValue + aiValue));
-        
-        // 30% chance of drift if AI says 0
-        if (Math.random() > 0.7) {
-            const drift = Math.random() > 0.5 ? 1 : -1;
-            return Math.max(0, Math.min(100, currentValue + drift));
-        }
-        return currentValue;
-    };
-
-    const newGlobalTension = applyNaturalDrift(result.globalTensionChange, gameState.globalTension);
-    const newEconomyHealth = applyNaturalDrift(result.economyHealthChange, gameState.economyHealth);
-    const newPopularity = applyNaturalDrift(result.popularityChange || 0, gameState.popularity);
-    
-    // Military and Corruption usually stay more stable, so we trust AI more there, but allow small drift
-    // exception: Corruption tends to creep up naturally if not fought
-    const corruptionDrift = result.corruptionChange === 0 && Math.random() > 0.8 ? 1 : result.corruptionChange || 0;
-    const newCorruption = Math.max(0, Math.min(100, gameState.corruption + corruptionDrift));
-    
+    const newGlobalTension = Math.max(0, Math.min(100, gameState.globalTension + result.globalTensionChange));
+    const newEconomyHealth = Math.max(0, Math.min(100, gameState.economyHealth + result.economyHealthChange));
     const newMilitaryPower = Math.max(0, Math.min(100, gameState.militaryPower + result.militaryPowerChange));
+    const newPopularity = Math.max(0, Math.min(100, gameState.popularity + (result.popularityChange || 0)));
+    const newCorruption = Math.max(0, Math.min(100, gameState.corruption + (result.corruptionChange || 0)));
     
     let newHasSpaceProgram = gameState.hasSpaceProgram;
     if (result.spaceProgramActive === true) {

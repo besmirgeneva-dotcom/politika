@@ -10,6 +10,8 @@ const HUGGINGFACE_API_KEY = process.env.VITE_HUGGINGFACE_API_KEY || "";
 export type AIProvider = 'gemini' | 'groq' | 'huggingface';
 
 // --- OPTIMIZATION: MINIFIED SCHEMA KEYS ---
+// To save output tokens, we ask the AI for short keys and map them back to full types.
+// 'ti' = timeIncrement, 'ev' = events, etc.
 const MINIFIED_SCHEMA = {
     type: Type.OBJECT,
     properties: {
@@ -39,7 +41,7 @@ const MINIFIED_SCHEMA = {
         items: {
             type: Type.OBJECT,
             properties: {
-                t: { type: Type.STRING, enum: ['annexation', 'build_base', 'build_defense', 'remove_entity', 'dissolve'] },
+                t: { type: Type.STRING, enum: ['annexation', 'build_base', 'build_defense', 'remove_entity', 'dissolve'] }, // Added 'dissolve'
                 tc: { type: Type.STRING }, // targetCountry
                 no: { type: Type.STRING }, // newOwner
                 lat: { type: Type.NUMBER },
@@ -105,7 +107,7 @@ const mapMinifiedToFull = (min: any): SimulationResponse => {
         popularityChange: min.po || 0,
         corruptionChange: min.co || 0,
         spaceProgramActive: min.sp,
-        nuclearAcquired: min.nu,
+        nuclearAcquired: min.nu, // NEW MAPPING
         mapUpdates: min.mu?.map((u: any) => ({
             type: u.t,
             targetCountry: u.tc,
@@ -175,20 +177,26 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
     }
 };
 
-// --- SYSTEM INSTRUCTIONS ---
+// --- CONDENSED SYSTEM INSTRUCTIONS (TOKEN SAVING) ---
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Règles:
-1. STATS (gt,ec,mi,po,co): DOIVENT CHANGER à chaque tour. Ne laisse jamais tout à 0. Ajoute de la volatilité (-3 à +3) même sans événement majeur.
-2. CARTE(mu): 'annexation', 'build_base', 'dissolve'.
+1. CARTE(mu):
+   - 'build_base'/'build_defense'
+   - 'annexation': Conquête normale.
+   - 'dissolve': Si pays détruit/rayé (ex: nuke), devient "Terre non revendiquée".
+2. NUCLEAIRE(nu): true SI joueur termine projet nucléaire.
 3. INFRA(iu): Civil seulement.
-4. ACTION: Arcade. Si action agressive, tension (gt) doit monter.
-5. FORMAT: JSON minifié uniquement.
+4. DIPLOMATIE(im): Pays souverains/ONU/OTAN seulement.
+5. ACTION: Arcade, permissif. Militaire>60=puissant.
+6. FORMAT: JSON minifié fourni (ti,ev,gt,nu...).
+7. STYLE: Descriptions courtes (max 15 mots).
 `;
 
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
     try {
         if (!GROQ_API_KEY) throw new Error("No Groq Key");
         let sys = system;
+        // Groq/Llama requires explicit JSON instruction
         if (jsonMode) sys += " REPOND UNIQUEMENT EN JSON VALIDE.";
         
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -212,11 +220,10 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
     try {
         if (!HUGGINGFACE_API_KEY) throw new Error("No Hugging Face Key");
         
-        // Mistral-7B is extremely reliable on free tier and handles CORS well usually
-        const MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"; 
+        // Using Phi-3.5-mini-instruct which is generally available on free inference API and good with JSON
+        const MODEL_ID = "microsoft/Phi-3.5-mini-instruct"; 
         
-        // Standard Mistral Instruction Format
-        const fullPrompt = `<s>[INST] ${system}\n\n${prompt} [/INST]`;
+        const fullPrompt = `<|system|>\n${system}\n<|end|>\n<|user|>\n${prompt}\n<|end|>\n<|assistant|>\n`;
 
         const response = await fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
             method: "POST",
@@ -227,9 +234,9 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
             body: JSON.stringify({
                 inputs: fullPrompt,
                 parameters: {
-                    max_new_tokens: 1500,
-                    return_full_text: false,
-                    temperature: 0.8,
+                    max_new_tokens: 2000,
+                    return_full_text: false, // Only get the generated part
+                    temperature: 0.7,
                     do_sample: true
                 }
             })
@@ -241,12 +248,18 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
         }
 
         const data = await response.json();
+        // HF Inference API usually returns array: [{ generated_text: "..." }]
         let text = Array.isArray(data) ? data[0]?.generated_text : data?.generated_text;
         
+        // Clean markdown code blocks if present
         text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        // Find the first '{' and last '}' to extract JSON
         const start = text.indexOf('{');
         const end = text.lastIndexOf('}');
-        if (start !== -1 && end !== -1) return text.substring(start, end + 1);
+        if (start !== -1 && end !== -1) {
+            return text.substring(start, end + 1);
+        }
         return text;
 
     } catch (e) { throw e; }
@@ -268,17 +281,21 @@ export const simulateTurn = async (
   alliance: Alliance | null = null
 ): Promise<SimulationResponse> => {
   
-  const hist = recentHistory.slice(-5).map(e => `[${e.date}]${e.type}:${e.headline}`).join(';');
+  // OPTIMIZATION: Reduce history size (6 events max instead of 15)
+  // OPTIMIZATION: Shorten event format string
+  const hist = recentHistory.slice(-6).map(e => `[${e.date}]${e.type}:${e.headline}`).join(';');
   const allContext = alliance ? `ALLIANCE:${alliance.name}` : "";
   
+  // OPTIMIZATION: Summarize territory list if too long (>8 items)
   let territoryStr = ownedTerritories.join(',');
   if (ownedTerritories.length > 8) {
     const core = ownedTerritories.slice(0, 3).join(',');
     territoryStr = `${core} (+${ownedTerritories.length - 3} others)`;
   }
   
+  // OPTIMIZATION: Ultra-short labels
   const prompt = `
-    DT:${currentDate}|P:${playerCountry}(Pow:${playerPower})|T:${territoryStr}|C:${chaosLevel}|${allContext}
+    DT:${currentDate}|P:${playerCountry}(Pow:${playerPower},Nuke:${hasNuclear})|T:${territoryStr}|C:${chaosLevel}|${allContext}
     ACT:"${playerAction || "Rien"}"
     HIST:${hist}
     INF:${entitiesSummary}
@@ -305,7 +322,7 @@ export const simulateTurn = async (
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: MINIFIED_SCHEMA,
-          temperature: 0.9, // Higher temp for more variance
+          temperature: 0.85,
       });
       return mapMinifiedToFull(JSON.parse(response.text));
   } catch (error) { 
@@ -323,6 +340,7 @@ export const sendDiplomaticMessage = async (
     provider: AIProvider = 'gemini'
 ): Promise<{ sender: string, text: string }[]> => {
     
+    // OPTIMIZATION: Only send last 3 relevant messages
     const conv = history
         .filter(msg => targets.includes(msg.senderName) || (msg.sender === 'player' && msg.targets.some(t => targets.includes(t))))
         .slice(-3)
@@ -331,17 +349,21 @@ export const sendDiplomaticMessage = async (
 
     const prompt = `
     Role:${targets.join(',')}.
-    Moi:${playerCountry}.
+    Moi:${playerCountry}(Pow:${context.militaryPower}).
     Chat:${conv}
     Msg:"${message}"
     JSON minifié:[{"s":"Pays","t":"Court"}]
     `;
 
+    // Minified Chat Schema
     const CHAT_SCHEMA = {
         type: Type.ARRAY,
         items: {
             type: Type.OBJECT,
-            properties: { s: { type: Type.STRING }, t: { type: Type.STRING } },
+            properties: {
+                s: { type: Type.STRING }, // sender
+                t: { type: Type.STRING }  // text
+            },
             required: ["s", "t"]
         }
     };
@@ -350,6 +372,7 @@ export const sendDiplomaticMessage = async (
         try {
             const jsonStr = await callGroq(prompt, "Tu es chef d'état. Repond JSON: [{'s':'Pays','t':'Message'}]", true);
             const raw = JSON.parse(jsonStr);
+            // Handle simple object vs array return from Groq
             const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
             return arr.map((r: any) => ({ sender: r.s, text: r.t }));
         } catch (e) { console.warn("Groq fail"); }
@@ -378,26 +401,18 @@ export const sendDiplomaticMessage = async (
     }
 }
 
-// Fallback dynamic pour ne pas figer les stats si l'API échoue
-const getFallbackResponse = (): SimulationResponse => {
-    // Random fluctuation between -2 and +2
-    const r = () => Math.floor(Math.random() * 5) - 2;
-    return {
-        timeIncrement: 'day',
-        events: [{ type: "world", headline: "Silence Radio", description: "Aucune information majeure reçue ce jour." }],
-        globalTensionChange: r(), 
-        economyHealthChange: r(), 
-        militaryPowerChange: 0, 
-        popularityChange: r(), 
-        corruptionChange: 0
-    };
-};
+const getFallbackResponse = (): SimulationResponse => ({
+    timeIncrement: 'day',
+    events: [{ type: "world", headline: "Interférences", description: "Données corrompues." }],
+    globalTensionChange: 0, economyHealthChange: 0, militaryPowerChange: 0, popularityChange: 0, corruptionChange: 0
+});
 
 export const getStrategicSuggestions = async (
     playerCountry: string,
     recentHistory: GameEvent[],
     provider: AIProvider = 'gemini'
 ): Promise<string[]> => {
+    // OPTIMIZATION: Only 3 historical events
     const hist = recentHistory.slice(-3).map(e => e.headline).join(';');
     const prompt = `3 actions courtes pour ${playerCountry}. Contexte:${hist}. JSON:{"s":["..."]}`;
     try {
@@ -414,5 +429,5 @@ export const getStrategicSuggestions = async (
         const response = await generateRobustContent(prompt, { responseMimeType: "application/json" });
         const p = JSON.parse(response.text);
         return p.s || p.suggestions || p;
-    } catch (e) { return ["Développer Industrie", "Renforcer Armée", "Accords Commerciaux"]; }
+    } catch (e) { return ["Industrie", "Armée", "Commerce"]; }
 }

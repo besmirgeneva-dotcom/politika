@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { MapContainer, GeoJSON, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -248,32 +249,26 @@ const MapLabels = ({ zoom, visibleCountries, ownedTerritories, playerCountry }: 
 
                 return (
                     <React.Fragment key={`label-${name}-${idx}`}>
-                        {/* We use the TileLayer for labels now, but keep player/owned labels if needed or distinct */}
-                        {/* Only keeping main country label if needed, but overlay covers most. Keeping for "Game" feel on big zoom out */}
-                        {zoom < 5 && (
-                            <Marker 
-                                position={center} 
-                                zIndexOffset={100}
-                                icon={L.divIcon({
-                                    className: 'bg-transparent',
-                                    html: `<div style="
-                                        color: rgba(255,255,255,0.7); 
-                                        text-shadow: 1px 1px 2px black; 
-                                        font-weight: bold; 
-                                        font-size: ${zoom < 4 ? '10px' : '13px'};
-                                        text-transform: uppercase;
-                                        text-align: center;
-                                        width: 200px;
-                                        margin-left: -100px;
-                                        pointer-events: none;
-                                        letter-spacing: 1px;
-                                        font-family: sans-serif;
-                                    ">${name}</div>`
-                                })}
-                            />
-                        )}
-                        
-                        {/* Capital markers from Game logic */}
+                        <Marker 
+                            position={center} 
+                            zIndexOffset={100}
+                            icon={L.divIcon({
+                                className: 'bg-transparent',
+                                html: `<div style="
+                                    color: rgba(255,255,255,0.9); 
+                                    text-shadow: 1px 1px 1px black; 
+                                    font-weight: bold; 
+                                    font-size: ${zoom < 4 ? '10px' : '13px'};
+                                    text-transform: uppercase;
+                                    text-align: center;
+                                    width: 200px;
+                                    margin-left: -100px;
+                                    pointer-events: none;
+                                    letter-spacing: 1px;
+                                    font-family: sans-serif;
+                                ">${name}</div>`
+                            })}
+                        />
                         {isCapitalVisible && (
                              <Marker 
                                 position={capitalInfo.coords}
@@ -332,29 +327,11 @@ interface WorldMapProps {
 }
 
 const CACHE_KEY = 'GEOSIM_MAP_DATA';
-const GEOJSON_URL = "https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson";
 
 const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, neutralTerritories = [], mapEntities, focusCountry }) => {
   const [geoData, setGeoData] = useState<any>(null);
   const [zoom, setZoom] = useState(3);
   const [centers, setCenters] = useState<{name: string, center: [number, number]}[]>([]);
-
-  // Function to process GeoJSON data after loading
-  const processGeoData = (data: any) => {
-      const newCenters: {name: string, center: [number, number]}[] = [];
-      data.features.forEach((feature: any) => {
-          const name = getFrenchName(feature.properties.name);
-          feature.properties.name = name; // Normalize name in GeoJSON
-          
-          if (CAPITAL_DATA[name]) {
-              newCenters.push({ name, center: CAPITAL_DATA[name].coords });
-          } else if (LABEL_OVERRIDES[name]) {
-              newCenters.push({ name, center: LABEL_OVERRIDES[name] });
-          }
-      });
-      setCenters(newCenters);
-      setGeoData(data);
-  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -370,103 +347,154 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         }
 
         try {
-            const response = await fetch(GEOJSON_URL);
+            const response = await fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json');
+            if (!response.ok) throw new Error('Network response was not ok');
             const data = await response.json();
-            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+            try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) {}
             processGeoData(data);
-        } catch (error) {
-            console.error("Failed to load map data", error);
+        } catch (err) {
+            console.error("Failed to load map data", err);
         }
     };
     loadData();
   }, []);
 
+  const processGeoData = (data: any) => {
+        setGeoData(data);
+        const newCenters: {name: string, center: [number, number]}[] = [];
+        data.features.forEach((f: any) => {
+                const frenchName = getFrenchName(f.properties.name);
+                let bestCenter: [number, number] | null = null;
+                const geometry = f.geometry;
+                if (geometry.type === "Polygon") {
+                    // @ts-ignore
+                    const layer = L.polygon(geometry.coordinates.map(ring => ring.map(c => [c[1], c[0]])));
+                    bestCenter = [layer.getBounds().getCenter().lat, layer.getBounds().getCenter().lng];
+                } else if (geometry.type === "MultiPolygon") {
+                    let maxArea = 0;
+                    geometry.coordinates.forEach((polyCoords: any[]) => {
+                        const latLngs = polyCoords[0].map((c: number[]) => [c[1], c[0]]);
+                        const layer = L.polygon(latLngs);
+                        const bounds = layer.getBounds();
+                        const area = (bounds.getEast() - bounds.getWest()) * (bounds.getNorth() - bounds.getSouth());
+                        if (area > maxArea) {
+                            maxArea = area;
+                            bestCenter = [bounds.getCenter().lat, bounds.getCenter().lng];
+                        }
+                    });
+                }
+                if (bestCenter) newCenters.push({ name: frenchName, center: bestCenter });
+        });
+        setCenters(newCenters);
+  };
+
+  const onEachFeature = (feature: any, layer: L.Layer) => {
+    const frenchName = getFrenchName(feature.properties.name);
+    layer.on({ click: (e) => { L.DomEvent.stopPropagation(e); onRegionClick(frenchName); } });
+  };
+
   const style = (feature: any) => {
-    const countryName = feature.properties.name;
-    let fillColor = "#1c1917"; // Stone-900 (fog/unknown)
-    
-    if (playerCountry && ownedTerritories.includes(countryName)) {
-        fillColor = countryName === playerCountry ? "#2563eb" : "#3b82f6"; // Blue
-    } else if (neutralTerritories.includes(countryName)) {
-        fillColor = "#7f1d1d"; // Red-900 (Destroyed)
-    } else {
-        fillColor = "#292524"; // Stone-800
+    const frenchName = getFrenchName(feature.properties.name);
+    const isOwned = ownedTerritories.includes(frenchName);
+    const isNeutral = neutralTerritories.includes(frenchName);
+
+    if (isNeutral) {
+        return {
+            fillColor: '#57534e', // Stone-600
+            fillOpacity: 0.5,
+            weight: 1,
+            color: '#78716c',
+            dashArray: '2',
+        };
     }
 
     return {
-      fillColor,
-      weight: 1,
-      opacity: 1,
-      color: '#44403c',
-      dashArray: '3',
-      fillOpacity: 0.7
+        fillColor: isOwned ? '#10b981' : 'transparent',
+        fillOpacity: isOwned ? 0.3 : 0, 
+        weight: isOwned ? 0 : 1, 
+        color: isOwned ? '#34d399' : 'rgba(255, 255, 255, 0.4)', 
+        dashArray: isOwned ? '' : '4',
     };
   };
-  
-  const onEachFeature = (feature: any, layer: L.Layer) => {
-    const name = feature.properties.name;
-    layer.on({
-      click: () => {
-        onRegionClick(name);
-      },
-      mouseover: (e) => {
-        e.target.setStyle({
-          weight: 2,
-          color: '#ffffff',
-          dashArray: '',
-          fillOpacity: 0.9
-        });
-      },
-      mouseout: (e) => {
-        e.target.setStyle({
-             weight: 1,
-             color: '#44403c',
-             dashArray: '3',
-             fillOpacity: 0.7
-        });
-      }
-    });
-    layer.bindTooltip(name, { sticky: true, direction: 'center', className: 'country-tooltip' });
-  };
 
-  if (!geoData) return <div className="text-stone-500 text-center mt-20 flex items-center justify-center h-full">Initialisation satellite...</div>;
+  // --- GROUPING LOGIC ---
+  const groupedEntities = useMemo(() => {
+    const groups: Record<string, MapEntity[]> = {};
+    mapEntities.forEach(ent => {
+        // Group by rounding coordinates (approx 10km radius)
+        const key = `${ent.lat.toFixed(1)}_${ent.lng.toFixed(1)}`;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(ent);
+    });
+    return Object.values(groups);
+  }, [mapEntities]);
+
+  const showMarkers = zoom >= 6; // Affichage un peu plus tôt vu qu'il y a moins de marqueurs
+  const showMarkerLabels = zoom >= 8;
 
   return (
-    <MapContainer 
-        center={[20, 0]} 
-        zoom={3} 
-        style={{ height: '100%', width: '100%', background: '#0c0a09' }}
-        minZoom={2}
-        maxZoom={6}
-        maxBounds={[[-90, -180], [90, 180]]}
-    >
+    <div className="w-full h-full absolute inset-0 z-0 bg-stone-900">
+      <MapContainer 
+        center={[20, 0]} zoom={3} scrollWheelZoom={true} minZoom={2} maxZoom={10}
+        maxBounds={[[-90, -180], [90, 180]]} zoomControl={false} attributionControl={false}
+        className="outline-none bg-stone-900 h-full w-full"
+      >
         <MapController onZoomChange={setZoom} />
         <FlyToCountry targetCountry={focusCountry} centers={centers} />
         
-        <GeoJSON 
-            data={geoData} 
-            style={style} 
-            onEachFeature={onEachFeature} 
-        />
+        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
 
-        <MapLabels 
-            zoom={zoom} 
-            visibleCountries={centers} 
-            ownedTerritories={ownedTerritories}
-            playerCountry={playerCountry}
-        />
+        {geoData && <GeoJSON key={`geo-${ownedTerritories.length}-${neutralTerritories.length}`} data={geoData} style={style} onEachFeature={onEachFeature} />}
 
-        {mapEntities.map((entity) => (
-             <Marker
-                key={entity.id}
-                position={[entity.lat, entity.lng]}
-                icon={createDotIcon(getEntityColor(entity.type), [], entity.type, zoom > 4)}
-             >
-                {zoom > 4 && <Popup>{entity.label || getEntityLabel(entity.type)}</Popup>}
-             </Marker>
-        ))}
+        <MapLabels zoom={zoom} visibleCountries={centers} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
 
-    </MapContainer>
+        {showMarkers && groupedEntities.map((group, idx) => {
+             const first = group[0];
+             // const isGroup = group.length > 1; // Unused
+             const labels = group.map(e => e.label || getEntityLabel(e.type));
+             const color = getEntityColor(first.type);
+             
+             // If positions are 0,0 try to find better center (fallback)
+             let pos: [number, number] = [first.lat, first.lng];
+             if (pos[0] === 0 && pos[1] === 0) {
+                 const override = LABEL_OVERRIDES[first.country];
+                 if (override) pos = override;
+                 else {
+                     const c = centers.find(x => x.name === first.country);
+                     if (c) pos = c.center;
+                     else if (CAPITAL_DATA[first.country]) pos = CAPITAL_DATA[first.country].coords;
+                 }
+             }
+
+             const icon = createDotIcon(color, labels, first.type, showMarkerLabels);
+
+             return (
+                 <Marker 
+                    key={`group-${idx}-${group.length}`} 
+                    position={pos} 
+                    icon={icon} 
+                    zIndexOffset={500}
+                 >
+                     {!showMarkerLabels && (
+                         <Popup>
+                             <div className="text-center p-1">
+                                 {group.map((e, i) => (
+                                     <div key={i} className="mb-1 last:mb-0">
+                                         <strong className="uppercase text-[10px] block" style={{color: getEntityColor(e.type)}}>
+                                             {getEntityLabel(e.type)}
+                                         </strong>
+                                         <span className="text-[9px] text-stone-500">{e.country}</span>
+                                     </div>
+                                 ))}
+                             </div>
+                         </Popup>
+                     )}
+                 </Marker>
+             );
+        })}
+
+      </MapContainer>
+    </div>
   );
 };
 
