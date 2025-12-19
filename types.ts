@@ -9,7 +9,7 @@ export interface GameEvent {
 }
 
 // Types restreints pour nettoyer la map et simplifier le jeu
-export type MapEntityType = 'military_base' | 'defense_system';
+export type MapEntityType = 'military_base' | 'air_base' | 'defense_system';
 
 export interface MapEntity {
   id: string;
@@ -83,7 +83,7 @@ export interface SimulationResponse {
   nuclearAcquired?: boolean; // NOUVEAU: L'IA valide l'obtention de la bombe
   // Mises à jour visuelles (Carte)
   mapUpdates?: {
-    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity' | 'dissolve';
+    type: 'annexation' | 'build_base' | 'build_air_base' | 'build_defense' | 'remove_entity' | 'dissolve';
     targetCountry: string;
     newOwner?: string;
     lat?: number;

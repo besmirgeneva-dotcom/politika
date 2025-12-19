@@ -6,7 +6,6 @@ import { normalizeCountryName } from "../constants";
 // --- CONFIGURATION ---
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || "";
-// HUGGINGFACE Removed due to CORS issues
 
 export type AIProvider = 'gemini' | 'groq' | 'huggingface';
 
@@ -45,7 +44,7 @@ const MINIFIED_SCHEMA = {
         items: {
             type: Type.OBJECT,
             properties: {
-                t: { type: Type.STRING, enum: ['annexation', 'build_base', 'build_defense', 'remove_entity', 'dissolve'] },
+                t: { type: Type.STRING, enum: ['annexation', 'build_base', 'build_air_base', 'build_defense', 'remove_entity', 'dissolve'] },
                 tc: { type: Type.STRING }, // targetCountry
                 no: { type: Type.STRING }, // newOwner
                 lat: { type: Type.NUMBER },
@@ -103,7 +102,7 @@ const mapMinifiedToFull = (min: any, tokens: number = 0): SimulationResponse => 
         events: min.ev?.map((e: any) => ({
             type: e.t || 'world',
             headline: e.h || 'Événement inconnu',
-            description: e.d || 'Aucun détail disponible.', // Sécurisation ici
+            description: e.d || 'Aucun détail disponible.', 
             relatedCountry: e.rc
         })) || [],
         globalTensionChange: min.gt || 0,
@@ -186,14 +185,78 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Simulation Géopolitique.
 RÈGLES CRITIQUES:
-1. NARRATION DYNAMIQUE: Ne te contente pas de confirmer les ordres. Décris les RÉACTIONS du monde. Si le joueur est puissant/nucléaire, ses voisins doivent s'inquiéter, protester ou s'armer.
-2. ÉVÉNEMENTS AUTONOMES: Si le joueur passe son tour ou fait une action mineure, TU DOIS IMPÉRATIVEMENT générer des événements mondiaux intéressants (Coups d'état, crises éco, tensions frontalières, avancées techno) sans lien direct avec le joueur pour rendre le monde vivant.
-3. NUCLÉAIRE: Si 'Nuc:OUI' dans le prompt, l'IA doit générer de la tension diplomatique, des sanctions ou de la peur chez les voisins.
-4. CARTE/STATS: Utilise les clés JSON (mu, gt, ec...) uniquement si nécessaire.
-5. FORMAT: JSON minifié valide.
-6. INTERDICTION MESSAGE: Ne jamais générer de message diplomatique (im) venant du pays du joueur. Ne jamais répéter les données techniques (INFRA:...) dans les textes.
-7. PAYS VIDE: Les pays dans 'TERRES_DESOLEES' sont vides/détruits. Le joueur peut les annexer sans résistance (type: 'annexation').
+1. NARRATION DYNAMIQUE: Ne te contente pas de confirmer les ordres. Décris les RÉACTIONS du monde. 
+2. ÉVÉNEMENTS AUTONOMES: Si le joueur passe son tour ou fait une action mineure, TU DOIS générer des événements mondiaux intéressants.
+3. NUCLÉAIRE: Si 'Nuc:OUI' dans le prompt, l'IA doit générer de la tension diplomatique.
+4. FORMAT: JSON minifié valide.
+5. CONSTRUCTION: 'build_base' = Base Militaire, 'build_air_base' = Base Aérienne, 'build_defense' = Système de Défense.
 `;
+
+export const simulateTurn = async (
+  playerCountry: string,
+  currentDate: string,
+  playerAction: string,
+  recentHistory: GameEvent[],
+  ownedTerritories: string[] = [],
+  entitiesSummary: string = "",
+  isLandlocked: boolean = false,
+  hasNuclear: boolean = false,
+  diplomaticContext: string = "",
+  chaosLevel: ChaosLevel = 'normal',
+  provider: AIProvider = 'gemini',
+  playerPower: number = 50,
+  alliance: Alliance | null = null,
+  neutralTerritories: string[] = [] 
+): Promise<SimulationResponse> => {
+  
+  const hist = recentHistory.slice(-5).map(e => `[${e.date}]${e.type}:${e.headline}`).join(';');
+  const allContext = alliance ? `ALLIANCE:${alliance.name}` : "Non-aligné";
+  
+  let territoryStr = ownedTerritories.join(',');
+  if (ownedTerritories.length > 8) {
+    const core = ownedTerritories.slice(0, 3).join(',');
+    territoryStr = `${core} (+${ownedTerritories.length - 3} others)`;
+  }
+
+  const neutralStr = neutralTerritories.length > 0 ? neutralTerritories.join(',') : "Aucun";
+  
+  const prompt = `
+    CONTEXTE:
+    Date:${currentDate} | Pays:${playerCountry} | Puissance:${playerPower}
+    Nucléaire:${hasNuclear ? "OUI" : "NON"} | Géo:${isLandlocked ? "Enclavé" : "Accès Mer"}
+    Alliances:${allContext} | Chaos:${chaosLevel}
+    Territoires:${territoryStr}
+    TERRES_DESOLEES: ${neutralStr}
+    
+    ACTION JOUEUR: "${playerAction || "Passif"}"
+    
+    HISTORIQUE: ${hist}
+    INFRA: ${entitiesSummary}
+    DIPLO: ${diplomaticContext}
+    
+    TÂCHE: Simuler le tour. FORMAT JSON MINIFIÉ.
+  `;
+
+  if (provider === 'groq' && GROQ_API_KEY) {
+      try {
+          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, null);
+          return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
+      } catch (e) { console.warn("Groq fail, fallback Gemini", e); }
+  } 
+
+  try {
+      const response = await generateRobustContent(prompt, {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: "application/json",
+          responseSchema: MINIFIED_SCHEMA,
+          temperature: 0.9, 
+      });
+      return mapMinifiedToFull(JSON.parse(response.text), estimateTokens(prompt, response.text));
+  } catch (error) { 
+      console.error("Gemini Error", error);
+      return getFallbackResponse(); 
+  }
+};
 
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
     try {
@@ -218,74 +281,6 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
     } catch (e) { throw e; }
 };
 
-export const simulateTurn = async (
-  playerCountry: string,
-  currentDate: string,
-  playerAction: string,
-  recentHistory: GameEvent[],
-  ownedTerritories: string[] = [],
-  entitiesSummary: string = "",
-  isLandlocked: boolean = false,
-  hasNuclear: boolean = false,
-  diplomaticContext: string = "",
-  chaosLevel: ChaosLevel = 'normal',
-  provider: AIProvider = 'gemini',
-  playerPower: number = 50,
-  alliance: Alliance | null = null,
-  neutralTerritories: string[] = [] // NOUVEAU
-): Promise<SimulationResponse> => {
-  
-  const hist = recentHistory.slice(-5).map(e => `[${e.date}]${e.type}:${e.headline}`).join(';');
-  const allContext = alliance ? `ALLIANCE:${alliance.name}` : "Non-aligné";
-  
-  let territoryStr = ownedTerritories.join(',');
-  if (ownedTerritories.length > 8) {
-    const core = ownedTerritories.slice(0, 3).join(',');
-    territoryStr = `${core} (+${ownedTerritories.length - 3} others)`;
-  }
-
-  const neutralStr = neutralTerritories.length > 0 ? neutralTerritories.join(',') : "Aucun";
-  
-  // Prompt enrichi avec le contexte nucléaire, géographique et les pays vides
-  const prompt = `
-    CONTEXTE:
-    Date:${currentDate} | Pays:${playerCountry} | Puissance:${playerPower}
-    Nucléaire:${hasNuclear ? "OUI (Menace)" : "NON"} | Géo:${isLandlocked ? "Enclavé" : "Accès Mer"}
-    Alliances:${allContext} | Chaos:${chaosLevel}
-    Territoires:${territoryStr}
-    TERRES_DESOLEES (Vides/Détruits): ${neutralStr}
-    
-    ACTION JOUEUR: "${playerAction || "Aucun ordre spécifique (Le pays tourne au ralenti)"}"
-    
-    HISTORIQUE: ${hist}
-    INFRA: ${entitiesSummary}
-    DIPLO: ${diplomaticContext}
-    
-    TÂCHE: Simuler le tour. IMPORTANT: Si l'action joueur est vide/passive, TU DOIS OBLIGATOIREMENT générer au moins 1 événement mondial majeur (guerre ailleurs, économie, catastrophe) pour que le jeu continue d'être intéressant. Si attaque pays vide -> annexion immédiate.
-  `;
-
-  if (provider === 'groq' && GROQ_API_KEY) {
-      try {
-          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, null);
-          return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
-      } catch (e) { console.warn("Groq fail, fallback Gemini", e); }
-  } 
-
-  try {
-      const response = await generateRobustContent(prompt, {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseSchema: MINIFIED_SCHEMA,
-          temperature: 0.9, 
-      });
-      return mapMinifiedToFull(JSON.parse(response.text), estimateTokens(prompt, response.text));
-  } catch (error) { 
-      console.error("Gemini Error", error);
-      return getFallbackResponse(); 
-  }
-};
-
-// Corrected filtering for chat to isolate group contexts strictly
 export const sendDiplomaticMessage = async (
     playerCountry: string,
     targets: string[],
@@ -320,28 +315,15 @@ export const sendDiplomaticMessage = async (
         .map(msg => `${msg.sender === 'player' ? 'Moi' : msg.senderName}:${msg.text}`)
         .join('|');
 
-    // NOUVEAU: Stringify du contexte pour injection réelle
     const contextStr = JSON.stringify(context);
 
-    // Prompt amélioré pour forcer l'IA à utiliser le contexte
     const prompt = `
     CONTEXTE GLOBAL JEU: ${contextStr}
-    (Utilise ces stats pour déterminer si les interlocuteurs doivent avoir peur, être respectueux ou méprisants).
-    
     INTERLOCUTEURS (IA): ${targets.join(',')}
     JOUEUR (Moi): ${playerCountry}
-    
-    HISTORIQUE CONVERSATION:
-    ${conv}
-    
-    NOUVEAU MESSAGE DU JOUEUR: "${message}"
-    
-    TÂCHE: Répondre en tant que les pays ciblés (INTERLOCUTEURS). 
-    - Si le joueur est puissant/nucléaire (voir contexte), sois prudent.
-    - Si le joueur est faible, sois arrogant.
-    - Sois bref et direct.
-    
-    FORMAT SORTIE: JSON minifié: [{"s":"NomPays","t":"MessageCourt"}]
+    HISTORIQUE: ${conv}
+    MESSAGE DU JOUEUR: "${message}"
+    TÂCHE: Répondre en tant que les pays ciblés. FORMAT SORTIE: JSON: [{"s":"NomPays","t":"MessageCourt"}]
     `;
 
     const CHAT_SCHEMA = {
@@ -355,7 +337,7 @@ export const sendDiplomaticMessage = async (
 
     if (provider === 'groq' && GROQ_API_KEY) {
         try {
-            const jsonStr = await callGroq(prompt, "Tu es chef d'état. Repond JSON: [{'s':'Pays','t':'Message'}]", true);
+            const jsonStr = await callGroq(prompt, "Chef d'état. JSON: [{'s':'Pays','t':'Message'}]", true);
             const raw = JSON.parse(jsonStr);
             const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
             return { 
@@ -380,15 +362,14 @@ export const sendDiplomaticMessage = async (
 }
 
 const getFallbackResponse = (): SimulationResponse => {
-    const r = () => Math.floor(Math.random() * 5) - 2;
     return {
         timeIncrement: 'day',
         tokenUsage: 0,
-        events: [{ type: "world", headline: "Silence Radio", description: "Aucune information majeure reçue ce jour." }],
-        globalTensionChange: r(), 
-        economyHealthChange: r(), 
+        events: [{ type: "world", headline: "Silence Radio", description: "Aucune information." }],
+        globalTensionChange: 0, 
+        economyHealthChange: 0, 
         militaryPowerChange: 0, 
-        popularityChange: r(), 
+        popularityChange: 0, 
         corruptionChange: 0
     };
 };
@@ -409,5 +390,5 @@ export const getStrategicSuggestions = async (
         const response = await generateRobustContent(prompt, { responseMimeType: "application/json" });
         const p = JSON.parse(response.text);
         return { suggestions: p.s || p.suggestions || p, usage: estimateTokens(prompt, response.text) };
-    } catch (e) { return { suggestions: ["Développer Industrie", "Renforcer Armée", "Accords Commerciaux"], usage: 0 }; }
+    } catch (e) { return { suggestions: ["Développer Industrie", "Renforcer Armée"], usage: 0 }; }
 }
