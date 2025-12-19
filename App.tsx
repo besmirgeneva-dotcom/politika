@@ -141,6 +141,7 @@ const App: React.FC = () => {
     currentDate: INITIAL_DATE,
     playerCountry: null,
     ownedTerritories: [],
+    neutralTerritories: [], // NOUVEAU
     mapEntities: [],
     infrastructure: {}, // NOUVEAU: Pour stocker les usines, etc.
     turn: 1,
@@ -460,6 +461,7 @@ const App: React.FC = () => {
         currentDate: INITIAL_DATE,
         playerCountry: null,
         ownedTerritories: [],
+        neutralTerritories: [],
         mapEntities: [],
         infrastructure: {}, // Init empty infrastructure
         turn: 1,
@@ -735,6 +737,7 @@ const App: React.FC = () => {
     }));
 
     let newOwnedTerritories = [...gameState.ownedTerritories];
+    let newNeutralTerritories = [...gameState.neutralTerritories];
     let newEntities = [...gameState.mapEntities];
     let newInfrastructure = JSON.parse(JSON.stringify(gameState.infrastructure || {})); // Deep copy
 
@@ -744,9 +747,25 @@ const App: React.FC = () => {
     // --- MISE À JOUR CARTE (VISUEL) ---
     if (result.mapUpdates) {
         for (const update of result.mapUpdates) {
-            if (update.type === 'annexation') {
-                const target = update.targetCountry;
-                const newOwner = update.newOwner || gameState.playerCountry;
+            if (update.type === 'dissolve') {
+                // DISSOLUTION DU PAYS (TERRA NULLIUS)
+                const target = normalizeCountryName(update.targetCountry);
+                // On le retire des pays possédés (si c'était le joueur ou un autre)
+                newOwnedTerritories = newOwnedTerritories.filter(t => t !== target);
+                // On l'ajoute aux territoires neutres/détruits
+                if (!newNeutralTerritories.includes(target)) {
+                    newNeutralTerritories.push(target);
+                }
+                showNotification(`Territoire détruit : ${target}`);
+            } else if (update.type === 'annexation') {
+                // NORMALISATION: On normalise le nom de la cible et du nouveau propriétaire
+                // pour s'assurer qu'ils correspondent aux clés du GeoJSON/Map
+                const target = normalizeCountryName(update.targetCountry); 
+                const newOwner = update.newOwner ? normalizeCountryName(update.newOwner) : gameState.playerCountry;
+                
+                // Si le territoire était neutre/détruit, on le "revendique" (retire de la liste neutre)
+                newNeutralTerritories = newNeutralTerritories.filter(t => t !== target);
+
                 if (newOwnedTerritories.includes(target)) {
                     if (newOwner !== gameState.playerCountry) {
                         newOwnedTerritories = newOwnedTerritories.filter(t => t !== target);
@@ -762,7 +781,7 @@ const App: React.FC = () => {
                 newEntities.push({
                     id: `ent-${Date.now()}-${Math.random()}`,
                     type: update.type as MapEntityType,
-                    country: update.targetCountry,
+                    country: normalizeCountryName(update.targetCountry), // Normalisation ici aussi
                     lat: update.lat || 0,
                     lng: update.lng || 0,
                     label: update.label
@@ -774,7 +793,7 @@ const App: React.FC = () => {
     // --- MISE À JOUR INFRASTRUCTURE (MÉMOIRE) ---
     if (result.infrastructureUpdates) {
         for (const update of result.infrastructureUpdates) {
-            const country = update.country;
+            const country = normalizeCountryName(update.country); // Normalisation
             const type = update.type;
             const change = update.change;
             
@@ -798,8 +817,8 @@ const App: React.FC = () => {
                 currentAlliance = {
                     name: result.allianceUpdate.name,
                     type: result.allianceUpdate.type || 'Militaire',
-                    members: result.allianceUpdate.members,
-                    leader: result.allianceUpdate.leader
+                    members: result.allianceUpdate.members.map(m => normalizeCountryName(m)), // Normalisation membres
+                    leader: normalizeCountryName(result.allianceUpdate.leader) // Normalisation leader
                 };
                 showNotification(`Alliance mise à jour: ${currentAlliance.name}`);
             }
@@ -810,9 +829,9 @@ const App: React.FC = () => {
     }
 
     if (newAiEvents.length > 0 && newAiEvents[0].relatedCountry) {
-        cameraTarget = newAiEvents[0].relatedCountry;
+        cameraTarget = normalizeCountryName(newAiEvents[0].relatedCountry);
     } else if (result.mapUpdates && result.mapUpdates.length > 0) {
-        cameraTarget = result.mapUpdates[0].targetCountry;
+        cameraTarget = normalizeCountryName(result.mapUpdates[0].targetCountry);
     }
 
     const newHistory = [...fullHistory, playerEvent, ...newAiEvents];
@@ -865,6 +884,24 @@ const App: React.FC = () => {
         if (!gameState.hasSpaceProgram) showNotification("Programme spatial activé !");
     }
 
+    // GESTION ACQUISITION NUCLÉAIRE (NEW)
+    if (result.nuclearAcquired === true && !newHasNuclear) {
+        newHasNuclear = true;
+        showNotification("⚠️ ARME NUCLÉAIRE OPÉRATIONNELLE ⚠️");
+        // On ajoute un event spécial dans l'historique pour marquer le coup
+        const nukeEvent: GameEvent = {
+            id: `nuke-acq-${Date.now()}`,
+            date: nextDate.toLocaleDateString('fr-FR'),
+            type: 'war',
+            headline: "Dissuasion Nucléaire",
+            description: "Nos scientifiques ont réussi. Nous sommes désormais une puissance nucléaire."
+        };
+        newAiEvents.push(nukeEvent);
+        newHistory.push(nukeEvent);
+        // Bonus de puissance immédiat
+        // newMilitaryPower = Math.min(100, newMilitaryPower + 20); // Optionnel, l'IA gère déjà les stats
+    }
+
     const newRank = calculateRank(newMilitaryPower);
     let gameOver = false;
     let failReason = null;
@@ -890,6 +927,7 @@ const App: React.FC = () => {
         currentDate: nextDate,
         turn: gameState.turn + 1,
         ownedTerritories: newOwnedTerritories,
+        neutralTerritories: newNeutralTerritories, // NEW
         mapEntities: newEntities,
         infrastructure: newInfrastructure, // Mise à jour de l'infra
         globalTension: newGlobalTension,
@@ -1339,6 +1377,7 @@ const App: React.FC = () => {
             <WorldMap 
                 playerCountry={gameState.playerCountry}
                 ownedTerritories={gameState.ownedTerritories}
+                neutralTerritories={gameState.neutralTerritories} // NEW
                 mapEntities={gameState.mapEntities}
                 onRegionClick={handleRegionSelect}
                 focusCountry={focusCountry}
@@ -1647,13 +1686,19 @@ const App: React.FC = () => {
                                     onClick={() => setAiProvider('gemini')}
                                     className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'gemini' ? 'bg-white shadow text-blue-600' : 'text-stone-500'}`}
                                 >
-                                    Google Gemini
+                                    Google
                                 </button>
                                 <button 
                                     onClick={() => setAiProvider('groq')}
                                     className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'groq' ? 'bg-white shadow text-orange-600' : 'text-stone-500'}`}
                                 >
-                                    Groq (Llama 3)
+                                    Groq
+                                </button>
+                                <button 
+                                    onClick={() => setAiProvider('huggingface')}
+                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${aiProvider === 'huggingface' ? 'bg-white shadow text-yellow-600' : 'text-stone-500'}`}
+                                >
+                                    HF
                                 </button>
                             </div>
                         </div>

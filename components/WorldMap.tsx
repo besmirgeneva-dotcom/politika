@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { MapContainer, GeoJSON, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -320,13 +321,14 @@ interface WorldMapProps {
   onRegionClick: (region: string) => void;
   playerCountry: string | null;
   ownedTerritories: string[];
+  neutralTerritories?: string[]; // Ajout prop neutre
   mapEntities: MapEntity[];
   focusCountry: string | null;
 }
 
 const CACHE_KEY = 'GEOSIM_MAP_DATA';
 
-const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, mapEntities, focusCountry }) => {
+const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, neutralTerritories = [], mapEntities, focusCountry }) => {
   const [geoData, setGeoData] = useState<any>(null);
   const [zoom, setZoom] = useState(3);
   const [centers, setCenters] = useState<{name: string, center: [number, number]}[]>([]);
@@ -394,6 +396,18 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
   const style = (feature: any) => {
     const frenchName = getFrenchName(feature.properties.name);
     const isOwned = ownedTerritories.includes(frenchName);
+    const isNeutral = neutralTerritories.includes(frenchName);
+
+    if (isNeutral) {
+        return {
+            fillColor: '#57534e', // Stone-600
+            fillOpacity: 0.5,
+            weight: 1,
+            color: '#78716c',
+            dashArray: '2',
+        };
+    }
+
     return {
         fillColor: isOwned ? '#10b981' : 'transparent',
         fillOpacity: isOwned ? 0.3 : 0, 
@@ -430,7 +444,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         
         <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
 
-        {geoData && <GeoJSON key={`geo-${ownedTerritories.length}`} data={geoData} style={style} onEachFeature={onEachFeature} />}
+        {geoData && <GeoJSON key={`geo-${ownedTerritories.length}-${neutralTerritories.length}`} data={geoData} style={style} onEachFeature={onEachFeature} />}
 
         <MapLabels zoom={zoom} visibleCountries={centers} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
 

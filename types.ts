@@ -1,4 +1,5 @@
 
+
 export interface GameEvent {
   id: string;
   date: string;
@@ -44,8 +45,9 @@ export interface GameState {
   currentDate: Date;
   playerCountry: string | null;
   ownedTerritories: string[];
+  neutralTerritories: string[]; // NOUVEAU: Pays détruits / non revendiqués
   mapEntities: MapEntity[];
-  infrastructure: Record<string, Record<string, number>>; // NOUVEAU: Stockage mémoire des usines/infra par pays
+  infrastructure: Record<string, Record<string, number>>;
   turn: number;
   events: GameEvent[];
   isProcessing: boolean;
@@ -78,9 +80,10 @@ export interface SimulationResponse {
   popularityChange: number;
   corruptionChange: number;
   spaceProgramActive?: boolean;
+  nuclearAcquired?: boolean; // NOUVEAU: L'IA valide l'obtention de la bombe
   // Mises à jour visuelles (Carte)
   mapUpdates?: {
-    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity';
+    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity' | 'dissolve'; // NOUVEAU: dissolve
     targetCountry: string;
     newOwner?: string;
     lat?: number;
