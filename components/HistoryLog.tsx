@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect } from 'react';
 import { GameEvent } from '../types';
 
@@ -10,7 +11,6 @@ interface HistoryLogProps {
 const HistoryLog: React.FC<HistoryLogProps> = ({ isOpen, onClose, history }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (isOpen && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -20,9 +20,7 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ isOpen, onClose, history }) => 
   if (!isOpen) return null;
 
   return (
-    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[85%] h-[50%] md:w-[380px] md:h-[400px] z-50 flex flex-col animate-scale-in">
-      
-      <div className="flex-1 bg-stone-100/95 backdrop-blur-md rounded-xl shadow-2xl border border-stone-300 flex flex-col overflow-hidden">
+    <div className="w-full max-w-sm h-[400px] bg-stone-100/95 backdrop-blur-md rounded-xl shadow-2xl border border-stone-300 flex flex-col overflow-hidden animate-scale-in pointer-events-auto">
         {/* Header */}
         <div className="bg-stone-800 p-3 flex justify-between items-center text-white">
           <h2 className="font-serif font-bold text-sm flex items-center gap-2">
@@ -40,12 +38,11 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ isOpen, onClose, history }) => 
           )}
           {history.map((event) => {
             const isPlayer = event.type === 'player';
-            
             return (
               <div key={event.id} className={`p-2 rounded border-l-2 shadow-sm text-xs transition-all ${
                 isPlayer 
-                  ? 'bg-emerald-100 border-emerald-600 text-stone-900 font-bold' // Joueur: Vert et Gras
-                  : 'bg-white border-stone-300 text-stone-600' // IA: Blanc et Normal
+                  ? 'bg-emerald-100 border-emerald-600 text-stone-900 font-bold'
+                  : 'bg-white border-stone-300 text-stone-600'
               }`}>
                 <div className="flex justify-between items-center mb-0.5 opacity-70 text-[9px] uppercase tracking-wider">
                     <span>{event.date}</span>
@@ -61,7 +58,6 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ isOpen, onClose, history }) => 
             );
           })}
         </div>
-      </div>
     </div>
   );
 };

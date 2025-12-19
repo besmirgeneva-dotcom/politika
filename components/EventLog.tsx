@@ -1,18 +1,19 @@
+
 import React, { useState, useEffect } from 'react';
 import { GameEvent } from '../types';
 
 interface EventLogProps {
   isOpen: boolean;
   onClose: () => void;
-  eventQueue: GameEvent[]; // Only unread events
-  onReadEvent: () => void; // Called when user clicks "Next"
+  eventQueue: GameEvent[]; 
+  onReadEvent: () => void; 
   playerAction: string;
   setPlayerAction: (action: string) => void;
   onAddOrder: () => void;
   pendingOrders: string[];
   isProcessing: boolean;
   onGetSuggestions: () => Promise<string[]>;
-  turn: number; // Added to track turn changes for resetting suggestions
+  turn: number;
 }
 
 const EventLog: React.FC<EventLogProps> = ({
@@ -32,8 +33,6 @@ const EventLog: React.FC<EventLogProps> = ({
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [hasFetchedThisTurn, setHasFetchedThisTurn] = useState(false);
 
-  // RESET LOGIC: Critical for token saving.
-  // We ensure suggestions are cleared every turn and ONLY fetched on user click.
   useEffect(() => {
     setSuggestions([]);
     setHasFetchedThisTurn(false);
@@ -44,9 +43,7 @@ const EventLog: React.FC<EventLogProps> = ({
   const currentEvent = eventQueue.length > 0 ? eventQueue[0] : null;
 
   const handleFetchSuggestions = async () => {
-      // Security check to prevent multiple calls per turn
       if (hasFetchedThisTurn) return;
-      
       setLoadingSuggestions(true);
       try {
         const res = await onGetSuggestions();
@@ -65,12 +62,9 @@ const EventLog: React.FC<EventLogProps> = ({
 
   const handleSendOrder = () => {
       if (!playerAction.trim()) return;
-      
-      // Remove the used suggestion from the list to avoid duplicates
       if (suggestions.includes(playerAction)) {
           setSuggestions(prev => prev.filter(s => s !== playerAction));
       }
-
       onAddOrder();
   };
 
@@ -82,10 +76,7 @@ const EventLog: React.FC<EventLogProps> = ({
   };
 
   return (
-    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[85%] h-[50%] md:w-[380px] md:h-[400px] z-50 flex flex-col animate-scale-in">
-      
-      <div className="flex-1 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col">
-        
+    <div className="w-full max-w-sm h-[420px] bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col animate-scale-in pointer-events-auto">
         {/* --- HEADER --- */}
         <div className={`p-3 border-b flex justify-between items-center ${
             currentEvent ? 'bg-stone-100' : 'bg-blue-600 text-white'
@@ -112,8 +103,6 @@ const EventLog: React.FC<EventLogProps> = ({
 
         {/* --- CONTENT --- */}
         <div className="flex-1 overflow-y-auto p-3 relative flex flex-col">
-            
-            {/* MODE 1: READING EVENTS (Queue not empty) */}
             {currentEvent ? (
                 <div className="flex flex-col gap-2 h-full">
                     <div className="flex-1 overflow-y-auto">
@@ -123,20 +112,16 @@ const EventLog: React.FC<EventLogProps> = ({
                             currentEvent.type === 'player' ? 'bg-blue-500' :
                             'bg-stone-500'
                         }`} />
-                        
                         <div className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-1">
                             {currentEvent.date} — {currentEvent.type}
                         </div>
-
                         <h3 className="text-lg font-serif font-bold text-stone-900 leading-tight mb-2">
                             {currentEvent.headline}
                         </h3>
-
                         <p className="text-stone-700 text-sm leading-relaxed">
                             {currentEvent.description}
                         </p>
                     </div>
-
                     <div className="pt-2 border-t border-stone-100 mt-auto">
                         <button
                             onClick={onReadEvent}
@@ -147,10 +132,7 @@ const EventLog: React.FC<EventLogProps> = ({
                     </div>
                 </div>
             ) : (
-                /* MODE 2: INPUT ORDERS */
                 <div className="flex flex-col h-full relative">
-                    
-                    {/* List of Pending Orders (Messages area) */}
                     <div className="flex-1 overflow-y-auto mb-2 pr-1 space-y-2">
                          {pendingOrders.length === 0 && suggestions.length === 0 && (
                             <div className="h-full flex flex-col items-center justify-center text-stone-300 opacity-60">
@@ -164,12 +146,10 @@ const EventLog: React.FC<EventLogProps> = ({
                                 {order}
                             </div>
                         ))}
-
-                        {/* Suggestions Area */}
                         {suggestions.length > 0 && (
                             <div className="bg-blue-50 p-2 rounded-lg border border-blue-100 my-2 animate-fade-in-up">
                                 <div className="text-[9px] font-bold text-blue-500 uppercase mb-1 flex items-center gap-1">
-                                    <span>💡</span> Suggestions IA (Générées)
+                                    <span>💡</span> Suggestions IA
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     {suggestions.map((s, i) => (
@@ -189,13 +169,9 @@ const EventLog: React.FC<EventLogProps> = ({
                             </div>
                         )}
                     </div>
-
-                    {/* Compact Input Area */}
                     <div className="mt-auto bg-stone-100 p-2 rounded-xl border border-stone-200 shadow-inner flex flex-col gap-1">
                         <div className="flex justify-between items-center ml-1">
-                            <label className="text-[9px] font-bold text-stone-500 uppercase">
-                                Nouvel Ordre
-                            </label>
+                            <label className="text-[9px] font-bold text-stone-500 uppercase">Nouvel Ordre</label>
                             <button 
                                 onClick={handleFetchSuggestions}
                                 disabled={loadingSuggestions || hasFetchedThisTurn}
@@ -204,12 +180,10 @@ const EventLog: React.FC<EventLogProps> = ({
                                     ? 'bg-stone-200 text-stone-400 border-stone-300 cursor-not-allowed'
                                     : 'bg-yellow-100 hover:bg-yellow-200 text-yellow-700 border-yellow-300'
                                 }`}
-                                title="Générer des stratégies via IA (Coût Tokens)"
                             >
                                 {loadingSuggestions ? 'Analyses...' : hasFetchedThisTurn ? 'Max 1/tour' : '💡 Demander Stratégies'}
                             </button>
                         </div>
-                        
                         <div className="flex gap-2 items-end">
                             <textarea
                                 value={playerAction}
@@ -219,7 +193,6 @@ const EventLog: React.FC<EventLogProps> = ({
                                 className="flex-1 p-2 rounded-lg border border-stone-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-serif text-stone-800 text-xs h-16 shadow-sm"
                                 disabled={isProcessing}
                             />
-                            
                             <button
                                 onClick={handleSendOrder}
                                 disabled={!playerAction.trim() || isProcessing}
@@ -232,16 +205,10 @@ const EventLog: React.FC<EventLogProps> = ({
                                 ➤
                             </button>
                         </div>
-                        {isProcessing && (
-                            <div className="text-center text-[9px] text-stone-400 animate-pulse">
-                                Transmission...
-                            </div>
-                        )}
                     </div>
                 </div>
             )}
         </div>
-      </div>
     </div>
   );
 };

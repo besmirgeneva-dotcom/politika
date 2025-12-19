@@ -4,7 +4,7 @@ import { MapContainer, GeoJSON, Marker, Popup, useMapEvents, useMap } from 'reac
 import L from 'leaflet';
 import * as turf from '@turf/turf';
 import { MapEntity, MapEntityType } from '../types';
-import { getFrenchName, LANDLOCKED_COUNTRIES, NUCLEAR_POWERS } from '../constants';
+import { getFrenchName } from '../constants';
 
 // --- ALGORITHME POINT-IN-POLYGON (Ray Casting) ---
 const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
@@ -126,7 +126,7 @@ const LABEL_OVERRIDES: Record<string, [number, number]> = {
     "France": [46.8, 2.5], "Chine": [35.5, 104.0], "Australie": [-25.0, 134.0], "Inde": [22.0, 78.0]
 };
 
-const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, neutralTerritories, hasAlliance }: { zoom: number, visibleCountries: any[], playerCountry: string | null, ownedTerritories: string[], neutralTerritories: string[], hasAlliance: boolean }) => {
+const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, neutralTerritories }: { zoom: number, visibleCountries: any[], playerCountry: string | null, ownedTerritories: string[], neutralTerritories: string[] }) => {
     const MAJOR_POWERS = ["États-Unis", "Russie", "Chine", "Brésil", "Australie", "Canada", "Inde", "France"];
     return (
         <>
@@ -146,13 +146,6 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, ne
                 
                 const opacity = zoom > 6 ? 0.4 : 0.8;
 
-                // Strategic Info
-                const hasSeaAccess = !LAND_POL_LIST.includes(name);
-                const isNuclear = NUCLEAR_POWERS.includes(name);
-                const showSeaIcon = zoom >= 3 && hasSeaAccess;
-                const showNucIcon = zoom >= 3 && isNuclear;
-                const showAllIcon = isPlayer && hasAlliance;
-
                 return (
                     <Marker 
                         key={`label-${name}-${idx}`}
@@ -165,11 +158,6 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, ne
                                     <div style="color: ${displayColor}; text-shadow: 0 0 3px rgba(255,255,255,0.9); font-weight: bold; font-size: ${fontSize}; text-transform: uppercase; text-align: center; opacity: ${opacity}; transition: opacity 0.3s;">
                                         ${displayName}
                                     </div>
-                                    <div style="display: flex; gap: 3px; margin-top: 2px; opacity: ${opacity};">
-                                        ${showSeaIcon ? '<span style="font-size: 9px;" title="Accès mer">⚓</span>' : ''}
-                                        ${showNucIcon ? '<span style="font-size: 9px;" title="Nucléaire">☢️</span>' : ''}
-                                        ${showAllIcon ? '<span style="font-size: 9px;" title="Alliance">🛡️</span>' : ''}
-                                    </div>
                                 </div>
                             `
                         })}
@@ -179,9 +167,6 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, ne
         </>
     );
 };
-
-// Local copy for Sea Access logic if needed
-const LAND_POL_LIST = LANDLOCKED_COUNTRIES;
 
 const CapitalMarkers = ({ zoom, ownedTerritories, playerCountry }: { zoom: number, ownedTerritories: string[], playerCountry: string | null }) => {
     const [capitals, setCapitals] = useState<any[]>([]);
@@ -240,10 +225,9 @@ interface WorldMapProps {
   neutralTerritories?: string[];
   mapEntities: MapEntity[];
   focusCountry: string | null;
-  hasAlliance?: boolean;
 }
 
-const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, neutralTerritories = [], mapEntities, focusCountry, hasAlliance = false }) => {
+const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, neutralTerritories = [], mapEntities, focusCountry }) => {
   const [geoData, setGeoData] = useState<any>(null);
   const [zoom, setZoom] = useState(3);
   const [centers, setCenters] = useState<{name: string, center: [number, number]}[]>([]);
@@ -309,7 +293,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         <MapController onZoomChange={setZoom} />
         <FlyToCountry targetCountry={focusCountry} centers={centers} />
         <GeoJSON key={`map-${ownedTerritories.length}-${neutralTerritories.length}`} data={displayGeoData || geoData} style={style} onEachFeature={(f, l) => l.on('click', () => onRegionClick(f.properties.name))} />
-        <MapLabels zoom={zoom} visibleCountries={centers} playerCountry={playerCountry} ownedTerritories={ownedTerritories} neutralTerritories={neutralTerritories} hasAlliance={hasAlliance} />
+        <MapLabels zoom={zoom} visibleCountries={centers} playerCountry={playerCountry} ownedTerritories={ownedTerritories} neutralTerritories={neutralTerritories} />
         <CapitalMarkers zoom={zoom} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
         {mapEntities.map((entity) => {
              if (zoom < 6) return null;

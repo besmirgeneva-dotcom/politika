@@ -29,7 +29,13 @@ const getInitialStats = (country: string): { power: number, corruption: number }
 };
 
 const calculateRank = (power: number): number => Math.max(1, Math.min(195, Math.floor(196 - (power * 1.95))));
-const isCountryLandlocked = (country: string): boolean => LANDLOCKED_COUNTRIES.some(c => country.includes(c));
+
+const isCountryLandlocked = (country: string | null): boolean => {
+    if (!country) return true;
+    const norm = normalizeCountryName(country);
+    return LANDLOCKED_COUNTRIES.some(c => c.toLowerCase() === norm.toLowerCase() || c.toLowerCase() === country.toLowerCase());
+};
+
 const hasNuclearArsenal = (country: string): boolean => NUCLEAR_POWERS.some(c => country.includes(c));
 const hasSpaceProgramInitial = (country: string): boolean => SPACE_POWERS.some(c => country.includes(c));
 const clamp = (value: number): number => Math.max(0, Math.min(100, value));
@@ -430,15 +436,14 @@ const App: React.FC = () => {
               mapEntities={gameState.mapEntities} 
               onRegionClick={handleRegionSelect} 
               focusCountry={focusCountry} 
-              hasAlliance={!!gameState.alliance}
             />
         </div>
 
-        {activeWindow !== 'none' && <div className="absolute inset-0 z-40" onClick={() => setActiveWindow('none')}></div>}
+        {activeWindow !== 'none' && <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]" onClick={() => setActiveWindow('none')}></div>}
 
         {!gameState.isGameOver && gameState.playerCountry && (
             <>
-                {/* HUD Jauges Gauche (Épaissi et labels mis à jour) */}
+                {/* HUD Jauges Gauche */}
                 <div className="absolute top-4 left-4 z-30 flex flex-col gap-2 pointer-events-none">
                     <div className="bg-stone-900/95 backdrop-blur-sm h-11 px-3 rounded-full border border-stone-700 shadow-2xl pointer-events-auto flex flex-row gap-2.5 items-center">
                         <StatGauge label="Tension" value={gameState.globalTension} color="bg-red-500" />
@@ -446,29 +451,29 @@ const App: React.FC = () => {
                         <StatGauge label="Armée" value={gameState.militaryPower} color="bg-blue-500" />
                         <StatGauge label="Population" value={gameState.popularity} color="bg-purple-500" />
                         <StatGauge label="Corruption" value={gameState.corruption} color="bg-orange-500" />
-                        <div className="h-4 w-px bg-stone-700 mx-0.5"></div>
-                        <div className="flex items-center gap-1.5">
-                            {gameState.hasNuclear && <span className="text-yellow-500 text-[10px] animate-pulse">☢️</span>}
-                            {gameState.alliance && <span className="text-indigo-400 text-[10px]">🛡️</span>}
-                        </div>
                     </div>
                 </div>
 
-                {/* HUD Profil Droite (Même hauteur, aligné) */}
+                {/* HUD Profil Droite - Avec icônes stratégiques sous le nom */}
                 <div className="absolute top-4 right-4 z-30 flex flex-row items-center gap-2 pointer-events-none">
-                    <div className="bg-stone-900/95 backdrop-blur-sm h-11 pl-4 pr-2 rounded-full border border-stone-700 shadow-2xl pointer-events-auto flex items-center gap-3">
+                    <div className="bg-stone-900/95 backdrop-blur-sm h-auto py-1.5 pl-4 pr-2 rounded-2xl border border-stone-700 shadow-2xl pointer-events-auto flex items-center gap-3 min-w-[140px]">
                         <div className="flex flex-col items-end">
-                             <div className="text-emerald-400 text-[7px] font-mono px-1 rounded bg-black/50 border border-emerald-900/30">T:{tokenCount}</div>
+                             <div className="text-emerald-400 text-[7px] font-mono px-1 rounded bg-black/50 border border-emerald-900/30 mb-1">T:{tokenCount}</div>
                         </div>
-                        <div className="flex flex-col items-end cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setIsGameMenuOpen(true)}>
+                        <div className="flex flex-col items-end cursor-pointer hover:opacity-80 transition-opacity flex-1" onClick={() => setIsGameMenuOpen(true)}>
                             <span className="text-[6px] text-stone-500 uppercase font-black leading-none mb-0.5 tracking-tighter">PRÉSIDENT</span>
-                            <span className="text-[10px] font-black text-white leading-none uppercase truncate max-w-[80px]">{gameState.playerCountry}</span>
+                            <span className="text-[10px] font-black text-white leading-none uppercase truncate max-w-[90px]">{gameState.playerCountry}</span>
+                            <div className="flex gap-1.5 mt-1 justify-end">
+                                {!isCountryLandlocked(gameState.playerCountry) && <span className="text-[10px]" title="Accès Mer">⚓</span>}
+                                {gameState.hasNuclear && <span className="text-[10px] animate-pulse" title="Nucléaire">☢️</span>}
+                                {gameState.alliance && <span className="text-[10px]" title="Alliance">🛡️</span>}
+                            </div>
                         </div>
-                        <img src={getFlagUrl(gameState.playerCountry)} className="w-8 h-8 rounded-full border border-stone-700 object-cover cursor-pointer" onClick={() => setIsGameMenuOpen(true)} />
+                        <img src={getFlagUrl(gameState.playerCountry)} className="w-9 h-9 rounded-full border border-stone-700 object-cover cursor-pointer" onClick={() => setIsGameMenuOpen(true)} />
                     </div>
                 </div>
                 
-                {/* GAME MENU (CENTRE AU MILIEU) */}
+                {/* GAME MENU */}
                 {isGameMenuOpen && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setIsGameMenuOpen(false)}>
                         <div className="bg-stone-900 border border-stone-600 shadow-2xl rounded-2xl p-6 w-full max-w-xs flex flex-col gap-5" onClick={e => e.stopPropagation()}>
@@ -505,20 +510,51 @@ const App: React.FC = () => {
                 )}
 
                 <DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing} />
-                <EventLog isOpen={activeWindow === 'events'} onClose={() => toggleWindow('events')} eventQueue={eventQueue} onReadEvent={() => eventQueue.length > 0 ? handleReadEvent() : setActiveWindow('none')} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={handleAddOrder} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={handleGetSuggestions} turn={gameState.turn} />
-                <HistoryLog isOpen={activeWindow === 'history'} onClose={() => toggleWindow('history')} history={fullHistory} />
-                <ChatInterface isOpen={activeWindow === 'chat'} onClose={() => toggleWindow('chat')} playerCountry={gameState.playerCountry} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={handleMarkChatRead} />
+                
+                {/* Windows perfectly centered with fixed container */}
+                {activeWindow === 'events' && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
+                        <div className="pointer-events-auto w-full max-w-sm">
+                            <EventLog isOpen={true} onClose={() => toggleWindow('events')} eventQueue={eventQueue} onReadEvent={() => eventQueue.length > 0 ? handleReadEvent() : setActiveWindow('none')} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={handleAddOrder} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={handleGetSuggestions} turn={gameState.turn} />
+                        </div>
+                    </div>
+                )}
+
+                {activeWindow === 'history' && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
+                        <div className="pointer-events-auto w-full max-w-sm">
+                            <HistoryLog isOpen={true} onClose={() => toggleWindow('history')} history={fullHistory} />
+                        </div>
+                    </div>
+                )}
+
+                {activeWindow === 'chat' && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
+                        <div className="pointer-events-auto w-full max-w-3xl">
+                            <ChatInterface isOpen={true} onClose={() => toggleWindow('chat')} playerCountry={gameState.playerCountry!} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={handleMarkChatRead} />
+                        </div>
+                    </div>
+                )}
+
+                {activeWindow === 'alliance' && gameState.alliance && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
+                        <div className="pointer-events-auto w-full max-w-sm">
+                            <AllianceWindow isOpen={true} onClose={() => toggleWindow('alliance')} alliance={gameState.alliance} playerCountry={gameState.playerCountry!} />
+                        </div>
+                    </div>
+                )}
                 
                 <div className="absolute bottom-6 left-6 z-30 flex gap-2">
                     <button onClick={() => toggleWindow('events')} className="bg-white text-stone-800 px-4 py-2 rounded-xl border shadow font-bold text-sm h-12 flex items-center gap-2"><span>✍️</span> Ordres {eventQueue.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{eventQueue.length}</span>}</button>
                     <button onClick={() => toggleWindow('chat')} className="bg-stone-800 text-white w-12 h-12 flex items-center justify-center rounded-xl shadow border border-stone-600 relative">💬 {hasUnreadChat && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-bounce"></span>}</button>
                     <button onClick={() => toggleWindow('history')} className="bg-stone-800 text-white w-12 h-12 flex items-center justify-center rounded-xl shadow border border-stone-600">📚</button>
+                    {gameState.alliance && <button onClick={() => toggleWindow('alliance')} className="bg-blue-600 text-white w-12 h-12 flex items-center justify-center rounded-xl shadow border border-blue-400">🛡️</button>}
                 </div>
             </>
         )}
 
         {showStartModal && !gameState.playerCountry && !pendingCountry && (
-            <div className="absolute inset-0 z-50 flex flex-col items-center justify-start pt-24 pointer-events-none p-4">
+            <div className="fixed inset-0 z-50 flex flex-col items-center justify-start pt-24 pointer-events-none p-4">
                 <div className="bg-white/95 p-4 rounded-xl max-w-sm w-full shadow-2xl border-2 border-stone-300 text-center pointer-events-auto transform scale-90">
                     <h2 className="text-lg font-bold text-stone-800 mb-2">Sélectionnez votre nation</h2>
                     <p className="text-sm text-stone-600 italic">Touchez un pays sur la carte pour en prendre le contrôle.</p>
@@ -527,7 +563,7 @@ const App: React.FC = () => {
         )}
 
         {pendingCountry && !gameState.playerCountry && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none p-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4">
                 <div className="bg-white/95 p-4 rounded-xl max-w-xs w-full shadow-2xl border-2 border-stone-300 text-center pointer-events-auto">
                     <h3 className="text-2xl font-serif font-bold text-blue-800 mb-4 uppercase tracking-tighter">{pendingCountry}</h3>
                     <div className="flex gap-2">
