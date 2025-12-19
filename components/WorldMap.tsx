@@ -144,9 +144,9 @@ const LABEL_OVERRIDES: Record<string, [number, number]> = {
     "Pérou": [-9.0, -75.0]
 };
 
-// --- MAP LABELS COMPONENT (ALWAYS VISIBLE) ---
-const MapLabels = ({ zoom, visibleCountries, ownedTerritories, playerCountry }: { zoom: number, visibleCountries: any[], ownedTerritories: string[], playerCountry: string | null }) => {
-    // RÈGLE : Les noms de tous les pays doivent s'afficher à partir du zoom 4
+// --- MAP LABELS COMPONENT ---
+const MapLabels = ({ zoom, visibleCountries, playerCountry }: { zoom: number, visibleCountries: any[], playerCountry: string | null }) => {
+    // RÈGLE : Affichage à partir du zoom 4
     if (zoom < 4) return null;
 
     return (
@@ -157,9 +157,7 @@ const MapLabels = ({ zoom, visibleCountries, ownedTerritories, playerCountry }: 
                 if (!center) return null;
 
                 const isPlayer = name === playerCountry;
-
-                // On affiche tous les noms si zoom >= 4, mais on réduit la taille si zoom faible
-                const fontSize = zoom < 5 ? '10px' : '14px';
+                const fontSize = zoom < 5 ? '10px' : '12px'; // Ajustement léger taille
 
                 return (
                     <Marker 
@@ -191,8 +189,8 @@ const MapLabels = ({ zoom, visibleCountries, ownedTerritories, playerCountry }: 
 };
 
 // --- CAPITAL MARKERS COMPONENT ---
-const CapitalMarkers = ({ zoom, ownedTerritories }: { zoom: number, ownedTerritories: string[] }) => {
-    // RÈGLE : les capitales de tous les pays doivent s'afficher à partir du zoom 6
+const CapitalMarkers = ({ zoom }: { zoom: number }) => {
+    // RÈGLE : Affichage à partir du zoom 6
     if (zoom < 6) return null;
 
     return (
@@ -206,8 +204,8 @@ const CapitalMarkers = ({ zoom, ownedTerritories }: { zoom: number, ownedTerrito
                         icon={L.divIcon({
                             className: 'bg-transparent',
                             html: `<div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
-                                <div style="width: 6px; height: 6px; background: #1f2937; border: 1.5px solid white; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.5);"></div>
-                                <div style="color: #1f2937; text-shadow: 1px 1px 0 rgba(255,255,255,0.8); font-size: 10px; font-weight: bold; margin-top: 2px; white-space: nowrap; background: rgba(255,255,255,0.4); padding: 0 2px; border-radius: 2px;">${info.city}</div>
+                                <div style="width: 8px; height: 8px; background: #1f2937; border: 2px solid white; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.5);"></div>
+                                <div style="color: #1f2937; text-shadow: 1px 1px 0 rgba(255,255,255,0.9); font-size: 11px; font-weight: 800; margin-top: 2px; white-space: nowrap; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px;">${info.city}</div>
                             </div>`
                         })}
                     />
@@ -264,7 +262,7 @@ const ProvinceLayer = ({
     const [provinceData, setProvinceData] = useState<any>(null);
     const map = useMap();
 
-    // RÈGLE : les pointillés en blanc des provinces doivent s'afficher à partir du zoom 7
+    // RÈGLE : Affichage à partir du zoom 7
     const isVisible = zoom >= 7;
 
     useEffect(() => {
@@ -288,17 +286,16 @@ const ProvinceLayer = ({
         
         const isOwned = ownedTerritories.includes(fullId);
         
-        // Base fill color
         let fillColor = "#d1d5db"; // Gris
         if (ownedTerritories.includes(fullId)) fillColor = "#4ade80"; // Vert clair (annexé)
         else if (playerCountry === focusCountry) fillColor = "#22c55e"; // Vert joueur
 
         return {
             fillColor,
-            weight: 1, // Ligne fine
+            weight: 1.5, // Épaisseur augmentée pour visibilité
             opacity: 1,
-            color: '#ffffff', // BLANC POUR LES POINTILLÉS
-            dashArray: '4, 4', // TRAITILLÉS
+            color: '#ffffff', // BLANC
+            dashArray: '5, 5', // TRAITILLÉS PLUS VISIBLES
             fillOpacity: 0.9
         };
     };
@@ -307,7 +304,7 @@ const ProvinceLayer = ({
 
     return (
         <GeoJSON 
-            key={`prov-${focusCountry}`} 
+            key={`prov-${focusCountry}-${zoom}`} // Force update on zoom to ensure style/visibility
             data={provinceData} 
             style={style} 
             onEachFeature={(feature, layer) => {
@@ -381,7 +378,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
 
   const style = (feature: any) => {
     const countryName = feature.properties.name;
-    let fillColor = "#d1d5db"; // Gris neutre (gray-300)
+    let fillColor = "#d1d5db"; // Gris neutre
     
     if (playerCountry === countryName) {
         fillColor = "#22c55e"; // Vert joueur
@@ -434,7 +431,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         {/* Base Layer */}
         <GeoJSON data={geoData} style={style} onEachFeature={onEachFeature} />
         
-        {/* Drill-down Provinces (TRAITILLÉ BLANC + ZOOM CONTROL) */}
+        {/* Drill-down Provinces (TRAITILLÉ BLANC) */}
         <ProvinceLayer 
             focusCountry={focusCountry} 
             onProvinceClick={onRegionClick}
@@ -443,16 +440,17 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
             zoom={zoom}
         />
 
-        {/* Labels & Markers */}
+        {/* Labels */}
         <MapLabels 
             zoom={zoom} 
             visibleCountries={centers} 
-            ownedTerritories={ownedTerritories}
             playerCountry={playerCountry}
         />
         
-        <CapitalMarkers zoom={zoom} ownedTerritories={ownedTerritories} />
+        {/* Capitales */}
+        <CapitalMarkers zoom={zoom} />
 
+        {/* Map Entities */}
         {mapEntities.map((entity) => (
              <Marker
                 key={entity.id}

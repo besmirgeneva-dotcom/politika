@@ -6,7 +6,7 @@ import { normalizeCountryName } from "../constants";
 // --- CONFIGURATION ---
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || "";
-const HUGGINGFACE_API_KEY = process.env.VITE_HUGGINGFACE_API_KEY || "";
+// HUGGINGFACE Removed due to CORS issues
 
 export type AIProvider = 'gemini' | 'groq' | 'huggingface';
 
@@ -173,7 +173,7 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
         try {
             return await withRetry(async () => {
                 return await ai.models.generateContent({
-                    model: "gemini-flash-lite-latest", // CORRECTION: Valid model name
+                    model: "gemini-flash-lite-latest",
                     contents: prompt,
                     config: config
                 });
@@ -216,46 +216,7 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
     } catch (e) { throw e; }
 };
 
-const callHuggingFace = async (prompt: string, system: string): Promise<string> => {
-    try {
-        if (!HUGGINGFACE_API_KEY) throw new Error("No Hugging Face Key");
-        
-        const MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"; 
-        const fullPrompt = `<s>[INST] ${system}\n\n${prompt} [/INST]`;
-
-        const response = await fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
-            method: "POST",
-            headers: { 
-                "Authorization": `Bearer ${HUGGINGFACE_API_KEY}`, 
-                "Content-Type": "application/json" 
-            },
-            body: JSON.stringify({
-                inputs: fullPrompt,
-                parameters: {
-                    max_new_tokens: 1500,
-                    return_full_text: false,
-                    temperature: 0.8,
-                    do_sample: true
-                }
-            })
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`HF Error ${response.status}: ${errText}`);
-        }
-
-        const data = await response.json();
-        let text = Array.isArray(data) ? data[0]?.generated_text : data?.generated_text;
-        
-        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        const start = text.indexOf('{');
-        const end = text.lastIndexOf('}');
-        if (start !== -1 && end !== -1) return text.substring(start, end + 1);
-        return text;
-
-    } catch (e) { throw e; }
-};
+// HuggingFace removed to prevent CORS errors on client side
 
 export const simulateTurn = async (
   playerCountry: string,
@@ -297,13 +258,7 @@ export const simulateTurn = async (
       } catch (e) { console.warn("Groq fail, fallback Gemini", e); }
   } 
   
-  if (provider === 'huggingface' && HUGGINGFACE_API_KEY) {
-      try {
-          const sys = SYSTEM_INSTRUCTION + " IMPORTANT: Repond uniquement en JSON valide minifié.";
-          const jsonStr = await callHuggingFace(prompt, sys);
-          return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
-      } catch (e) { console.warn("HF fail, fallback Gemini", e); }
-  }
+  // HF Removed
 
   try {
       const response = await generateRobustContent(prompt, {
@@ -386,18 +341,7 @@ export const sendDiplomaticMessage = async (
         } catch (e) { console.warn("Groq fail"); }
     }
 
-    if (provider === 'huggingface' && HUGGINGFACE_API_KEY) {
-        try {
-            const sys = "Tu es chef d'état. Repond uniquement en JSON valide: [{'s':'Pays','t':'Message'}]";
-            const jsonStr = await callHuggingFace(prompt, sys);
-            const raw = JSON.parse(jsonStr);
-            const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
-            return { 
-                messages: arr.map((r: any) => ({ sender: r.s, text: r.t })), 
-                usage: estimateTokens(prompt, jsonStr) 
-            };
-        } catch (e) { console.warn("HF fail"); }
-    }
+    // HF Removed
     
     try {
         const response = await generateRobustContent(prompt, { 
@@ -440,11 +384,7 @@ export const getStrategicSuggestions = async (
              const p = JSON.parse(j);
              return { suggestions: p.s || p.suggestions || [], usage: estimateTokens(prompt, j) };
         }
-        if (provider === 'huggingface' && HUGGINGFACE_API_KEY) {
-             const j = await callHuggingFace(prompt, "Conseiller stratégique. Repond uniquement en JSON valide: {s:[]}");
-             const p = JSON.parse(j);
-             return { suggestions: p.s || p.suggestions || [], usage: estimateTokens(prompt, j) };
-        }
+        // HF Removed
         const response = await generateRobustContent(prompt, { responseMimeType: "application/json" });
         const p = JSON.parse(response.text);
         return { suggestions: p.s || p.suggestions || p, usage: estimateTokens(prompt, response.text) };
