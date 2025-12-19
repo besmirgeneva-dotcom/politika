@@ -143,6 +143,20 @@ const App: React.FC = () => {
       } catch (e) { showNotification("Échec Sauvegarde"); }
   };
 
+  const deleteGame = async (id: string) => {
+      if (!user || !db) return;
+      if (!confirm("Supprimer définitivement cette sauvegarde ?")) return;
+      try {
+          const batch = writeBatch(db);
+          batch.delete(doc(db, "users", user.uid, "games", id));
+          batch.delete(doc(db, "users", user.uid, "game_metas", id));
+          await batch.commit();
+          showNotification("Sauvegarde supprimée.");
+      } catch (e) {
+          showNotification("Erreur suppression.");
+      }
+  }
+
   const loadGameById = async (id: string) => {
       try {
           const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
@@ -379,20 +393,41 @@ const App: React.FC = () => {
 
   if (appMode === 'portal_landing') {
       return (
-          <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-10">
-              <GameLogo />
-              <button onClick={() => user ? setAppMode('portal_dashboard') : setShowLoginModal(true)} className="px-10 py-4 bg-black text-white font-bold rounded-xl text-xl hover:scale-105 transition-transform">JOUER ➔</button>
+          <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center gap-12 p-6 overflow-hidden relative">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-stone-900 to-stone-950"></div>
+              <div className="relative z-10 scale-125 md:scale-150 mb-12">
+                  <GameLogo />
+              </div>
+              <div className="relative z-10 flex flex-col items-center gap-4 w-full max-w-xs">
+                <button 
+                    onClick={() => user ? setAppMode('portal_dashboard') : setShowLoginModal(true)} 
+                    className="group relative w-full overflow-hidden px-8 py-4 bg-white text-stone-950 font-black rounded-2xl text-xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(255,255,255,0.3)]"
+                >
+                    <span className="relative z-10">DÉMARRER LE PROTOCOLE ➔</span>
+                    <div className="absolute inset-0 bg-emerald-400 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                </button>
+                <p className="text-stone-500 text-[10px] uppercase font-bold tracking-[0.3em] animate-pulse">Waiting for authorization...</p>
+              </div>
+
               {showLoginModal && (
-                  <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-                      <div className="bg-white p-6 rounded-2xl w-full max-w-sm">
-                          <h2 className="text-xl font-bold mb-4">{isRegistering ? "Inscription" : "Connexion"}</h2>
-                          <form onSubmit={(e) => { e.preventDefault(); isRegistering ? registerWithEmail(authEmail, authPassword) : loginWithEmail(authEmail, authPassword); }}>
-                              <input type="email" placeholder="Email" className="w-full p-3 border mb-2 rounded" value={authEmail} onChange={e => setAuthEmail(e.target.value)} />
-                              <input type="password" placeholder="Pass" className="w-full p-3 border mb-4 rounded" value={authPassword} onChange={e => setAuthPassword(e.target.value)} />
-                              <button className="w-full py-3 bg-blue-600 text-white font-bold rounded">{isRegistering ? "S'inscrire" : "Se connecter"}</button>
+                  <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+                      <div className="bg-stone-900 p-8 rounded-3xl w-full max-w-sm border border-stone-800 shadow-2xl animate-scale-in">
+                          <h2 className="text-2xl font-black text-white mb-6 uppercase tracking-tighter">{isRegistering ? "NOUVEAU COMPTE" : "ACCÈS SÉCURISÉ"}</h2>
+                          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); isRegistering ? registerWithEmail(authEmail, authPassword) : loginWithEmail(authEmail, authPassword); }}>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-stone-500 uppercase ml-1">Identifiant Email</label>
+                                <input type="email" placeholder="agent@geosim.net" className="w-full p-4 bg-stone-800 border border-stone-700 text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all" value={authEmail} onChange={e => setAuthEmail(e.target.value)} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-stone-500 uppercase ml-1">Mot de Passe</label>
+                                <input type="password" placeholder="••••••••" className="w-full p-4 bg-stone-800 border border-stone-700 text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all" value={authPassword} onChange={e => setAuthPassword(e.target.value)} />
+                              </div>
+                              <button className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-500 shadow-lg shadow-blue-900/20 transition-all">{isRegistering ? "S'ENREGISTRER" : "SE CONNECTER"}</button>
                           </form>
-                          <button onClick={() => setIsRegistering(!isRegistering)} className="w-full mt-2 text-blue-500 text-xs">{isRegistering ? "Déjà un compte ?" : "Créer un compte"}</button>
-                          <button onClick={() => setShowLoginModal(false)} className="w-full mt-4 text-stone-400">Annuler</button>
+                          <div className="mt-6 flex flex-col gap-3">
+                            <button onClick={() => setIsRegistering(!isRegistering)} className="text-blue-400 text-xs font-bold hover:underline">{isRegistering ? "Déjà un profil ? Connexion" : "Créer un nouveau profil agent"}</button>
+                            <button onClick={() => setShowLoginModal(false)} className="text-stone-500 text-xs font-bold hover:text-white uppercase tracking-widest">Abandonner</button>
+                          </div>
                       </div>
                   </div>
               )}
@@ -402,26 +437,121 @@ const App: React.FC = () => {
 
   if (appMode === 'portal_dashboard') {
       return (
-          <div className="min-h-screen bg-stone-50 p-10">
-              <div className="max-w-4xl mx-auto">
-                  <h1 className="text-3xl font-black mb-10">POLITIKA HUB</h1>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="bg-white p-6 rounded-2xl border shadow-sm cursor-pointer hover:shadow-md" onClick={launchGeoSim}>
-                          <h2 className="text-xl font-bold mb-4">NOUVELLE PARTIE</h2>
-                          <div className="h-32 bg-stone-100 rounded-xl flex items-center justify-center text-3xl">🌍</div>
+          <div className="min-h-screen bg-stone-950 p-6 md:p-12 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-1/2 h-1/2 bg-blue-900/10 blur-[120px] rounded-full"></div>
+              <div className="absolute bottom-0 left-0 w-1/3 h-1/3 bg-emerald-900/10 blur-[100px] rounded-full"></div>
+              
+              <div className="max-w-5xl mx-auto relative z-10">
+                  <div className="flex justify-between items-end mb-12 border-b border-stone-800 pb-8">
+                    <div>
+                        <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter uppercase mb-2">POLITIKA<span className="text-blue-500">_HUB</span></h1>
+                        <p className="text-stone-500 font-mono text-xs uppercase tracking-[0.2em]">Terminal d'administration géopolitique v1.0.4</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                        <div className="flex items-center gap-3 bg-stone-900 p-2 rounded-xl border border-stone-800 shadow-sm">
+                            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs">A</div>
+                            <div className="hidden md:block">
+                                <div className="text-[10px] text-stone-500 font-bold leading-none">AGENT CONNECTÉ</div>
+                                <div className="text-xs text-white font-bold truncate max-w-[120px]">{user?.email}</div>
+                            </div>
+                            <button onClick={logout} className="p-2 hover:bg-red-900/20 text-stone-500 hover:text-red-500 rounded-lg transition-colors">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                            </button>
+                        </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                      {/* Nouvelle Partie Card */}
+                      <div className="lg:col-span-1 flex flex-col">
+                        <div 
+                            onClick={launchGeoSim}
+                            className="group relative flex-1 bg-stone-900 rounded-[2rem] border border-stone-800 p-8 cursor-pointer overflow-hidden transition-all hover:border-emerald-500/50 hover:shadow-[0_0_40px_rgba(16,185,129,0.1)]"
+                        >
+                            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+                                <span className="text-8xl">🌍</span>
+                            </div>
+                            <div className="relative z-10 h-full flex flex-col">
+                                <div className="mb-auto">
+                                    <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 border border-emerald-500/20 group-hover:scale-110 transition-transform">
+                                        <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                    </div>
+                                    <h2 className="text-3xl font-black text-white leading-tight uppercase mb-4">NOUVELLE<br/>OPÉRATION</h2>
+                                    <p className="text-stone-500 text-sm leading-relaxed">Initiez un nouveau scénario de domination mondiale. Choisissez votre nation et modelez l'histoire.</p>
+                                </div>
+                                <div className="mt-8">
+                                    <div className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 group-hover:bg-emerald-500 text-white font-bold rounded-xl transition-all">
+                                        LANCER LE PROTOCOLE
+                                        <svg className="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                       </div>
-                      <div className="bg-white p-6 rounded-2xl border shadow-sm">
-                          <h2 className="text-xl font-bold mb-4">SAUVEGARDES</h2>
-                          <div className="space-y-2 overflow-y-auto max-h-48">
-                              {availableSaves.map(s => (
-                                  <div key={s.id} onClick={() => loadGameById(s.id)} className="p-2 border rounded hover:bg-stone-50 cursor-pointer flex justify-between">
-                                      <span>{s.country}</span> <span className="text-xs text-stone-400">Tour {s.turn}</span>
+
+                      {/* Sauvegardes List */}
+                      <div className="lg:col-span-2 bg-stone-900/50 backdrop-blur-sm rounded-[2.5rem] border border-stone-800 p-8 flex flex-col">
+                          <div className="flex items-center justify-between mb-8">
+                            <h2 className="text-xl font-bold text-white flex items-center gap-3">
+                                <span className="p-2 bg-stone-800 rounded-lg text-stone-400">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
+                                </span>
+                                ARCHIVES DISPONIBLES
+                            </h2>
+                            <span className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">{availableSaves.length} slots utilisés</span>
+                          </div>
+
+                          <div className="flex-1 space-y-3 overflow-y-auto max-h-[400px] pr-2 scrollbar-hide">
+                              {availableSaves.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-stone-800 rounded-3xl p-12 text-center opacity-40">
+                                    <div className="text-4xl mb-4">💾</div>
+                                    <p className="text-stone-500 text-sm font-bold uppercase tracking-widest">Aucune donnée archivée</p>
+                                </div>
+                              ) : availableSaves.map(s => (
+                                  <div 
+                                    key={s.id} 
+                                    className="group flex flex-col md:flex-row md:items-center justify-between p-5 bg-stone-900 border border-stone-800 rounded-2xl transition-all hover:bg-stone-800/50 hover:border-stone-700"
+                                  >
+                                      <div className="flex items-center gap-4 mb-4 md:mb-0">
+                                          <div className="w-12 h-12 rounded-xl bg-stone-800 flex items-center justify-center text-2xl overflow-hidden border border-stone-700 group-hover:border-blue-500/50 transition-colors">
+                                              <img src={getFlagUrl(s.country)} alt="" className="w-full h-full object-cover" />
+                                          </div>
+                                          <div>
+                                              <div className="text-lg font-black text-white uppercase leading-none mb-1">{s.country}</div>
+                                              <div className="flex gap-3 text-[10px] font-bold text-stone-500 uppercase tracking-tighter">
+                                                  <span>Tour {s.turn}</span>
+                                                  <span>•</span>
+                                                  <span>{s.date}</span>
+                                              </div>
+                                          </div>
+                                      </div>
+                                      <div className="flex gap-2">
+                                          <button 
+                                            onClick={() => loadGameById(s.id)} 
+                                            className="flex-1 md:flex-none px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition-all shadow-lg shadow-blue-900/10 uppercase"
+                                          >
+                                            Charger
+                                          </button>
+                                          <button 
+                                            onClick={() => deleteGame(s.id)} 
+                                            className="p-2.5 bg-stone-800 hover:bg-red-900/30 text-stone-500 hover:text-red-500 border border-stone-700 hover:border-red-900/50 rounded-xl transition-all"
+                                            title="Supprimer la sauvegarde"
+                                          >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                          </button>
+                                      </div>
                                   </div>
                               ))}
                           </div>
                       </div>
                   </div>
               </div>
+
+              {notification && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 bg-white text-stone-900 font-bold rounded-full shadow-2xl animate-fade-in-up border border-stone-200">
+                    {notification}
+                </div>
+              )}
           </div>
       );
   }
@@ -571,6 +701,12 @@ const App: React.FC = () => {
                         <button onClick={confirmCountrySelection} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold shadow text-xs uppercase">Confirmer</button>
                     </div>
                 </div>
+            </div>
+        )}
+
+        {notification && (
+            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 bg-white text-stone-900 font-bold rounded-full shadow-2xl animate-fade-in-up border border-stone-200">
+                {notification}
             </div>
         )}
     </div>
