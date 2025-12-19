@@ -753,6 +753,19 @@ const App: React.FC = () => {
     let newInfrastructure = JSON.parse(JSON.stringify(gameState.infrastructure || {})); // Deep copy
 
     let newHasNuclear = gameState.hasNuclear;
+    
+    // --- MANUAL OVERRIDE FOR NUCLEAR ACQUISITION ---
+    // Sometimes AI forgets to set the flag in JSON but describes it in text.
+    // We check if the player asked for it AND the AI response seems positive or successful.
+    if (!newHasNuclear && finalOrderString.toLowerCase().includes("nucléaire")) {
+        const successKeywords = ["réussite", "succès", "opérationnel", "acquis", "développé", "doté"];
+        const aiResponseText = newAiEvents.map(e => e.description.toLowerCase() + " " + e.headline.toLowerCase()).join(" ");
+        if (successKeywords.some(kw => aiResponseText.includes(kw))) {
+            newHasNuclear = true;
+            result.nuclearAcquired = true; // Force event trigger below
+        }
+    }
+
     let cameraTarget = gameState.playerCountry;
 
     // --- MISE À JOUR CARTE (VISUEL) ---
@@ -908,7 +921,7 @@ const App: React.FC = () => {
         if (!gameState.hasSpaceProgram) showNotification("Programme spatial activé !");
     }
 
-    if (result.nuclearAcquired === true && !newHasNuclear) {
+    if (result.nuclearAcquired === true && !gameState.hasNuclear) { // Fix: Check against OLD state
         newHasNuclear = true;
         showNotification("⚠️ ARME NUCLÉAIRE OPÉRATIONNELLE ⚠️");
         const nukeEvent: GameEvent = {

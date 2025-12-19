@@ -173,7 +173,7 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
         try {
             return await withRetry(async () => {
                 return await ai.models.generateContent({
-                    model: "gemini-2.5-flash-lite-latest",
+                    model: "gemini-flash-lite-latest", // CORRECTION: Valid model name
                     contents: prompt,
                     config: config
                 });
@@ -186,11 +186,11 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Règles:
 1. STATS (gt,ec,mi,po,co): DOIVENT CHANGER à chaque tour. Ne laisse jamais tout à 0. Ajoute de la volatilité (-3 à +3) même sans événement majeur.
-2. CARTE(mu): 'annexation' (Pays entier), 'annex_province' (Une partie, ex: "France:Normandie"), 'build_base', 'dissolve'.
+2. CARTE(mu): 'annexation', 'annex_province', 'build_base', 'dissolve'.
 3. INFRA(iu): Civil seulement.
 4. ACTION: Arcade. Si action agressive, tension (gt) doit monter.
-5. FORMAT: JSON minifié uniquement.
-Si le joueur demande d'attaquer une région spécifique, utilise 'annex_province' avec le nom "Pays:Région".
+5. IMPORTANT NUCLÉAIRE: Si le joueur dit "doter de l'arme nucléaire", "lancer programme nucléaire" ou similaire et que tu acceptes, TU DOIS METTRE "nu": true dans le JSON.
+6. FORMAT: JSON minifié uniquement.
 `;
 
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {

@@ -5,7 +5,7 @@ import L from 'leaflet';
 import { MapEntity, MapEntityType } from '../types';
 import { getFrenchName, normalizeCountryName } from '../constants';
 
-// --- CUSTOM DOT MARKERS ---
+// --- CUSTOM MARKERS ---
 const createDotIcon = (color: string, labels: string[], type: string, showLabel: boolean) => {
   const labelHtml = labels.length > 0 ? labels.map(l => `<div>${l}</div>`).join('') : getEntityLabel(type as MapEntityType);
 
@@ -71,68 +71,148 @@ interface CapitalInfo {
     city: string;
 }
 
+// Données des capitales étendues
 const CAPITAL_DATA: Record<string, CapitalInfo> = {
-    // Liste réduite pour l'exemple, l'existant est conservé dans le contexte global
-    "États-Unis": { coords: [38.9072, -77.0369], city: "Washington D.C." },
+    "États-Unis": { coords: [38.9072, -77.0369], city: "Washington" },
     "France": { coords: [48.8566, 2.3522], city: "Paris" },
     "Chine": { coords: [39.9042, 116.4074], city: "Pékin" },
     "Russie": { coords: [55.7558, 37.6173], city: "Moscou" },
-    // ... les autres capitales sont supposées être là
+    "Royaume-Uni": { coords: [51.5074, -0.1278], city: "Londres" },
+    "Allemagne": { coords: [52.5200, 13.4050], city: "Berlin" },
+    "Japon": { coords: [35.6762, 139.6503], city: "Tokyo" },
+    "Inde": { coords: [28.6139, 77.2090], city: "New Delhi" },
+    "Brésil": { coords: [-15.8267, -47.9218], city: "Brasília" },
+    "Canada": { coords: [45.4215, -75.6972], city: "Ottawa" },
+    "Australie": { coords: [-35.2809, 149.1300], city: "Canberra" },
+    "Italie": { coords: [41.9028, 12.4964], city: "Rome" },
+    "Espagne": { coords: [40.4168, -3.7038], city: "Madrid" },
+    "Égypte": { coords: [30.0444, 31.2357], city: "Le Caire" },
+    "Afrique du Sud": { coords: [-25.7479, 28.2293], city: "Pretoria" },
+    "Mexique": { coords: [19.4326, -99.1332], city: "Mexico" },
+    "Argentine": { coords: [-34.6037, -58.3816], city: "Buenos Aires" },
+    "Turquie": { coords: [39.9334, 32.8597], city: "Ankara" },
+    "Iran": { coords: [35.6892, 51.3890], city: "Téhéran" },
+    "Corée du Sud": { coords: [37.5665, 126.9780], city: "Séoul" },
+    "Indonésie": { coords: [-6.2088, 106.8456], city: "Jakarta" },
+    "Arabie saoudite": { coords: [24.7136, 46.6753], city: "Riyad" }
 };
 
+// Sources GeoJSON pour les provinces (Mapping Pays -> URL)
+const PROVINCE_SOURCES: Record<string, string> = {
+    "États-Unis": "https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json",
+    "France": "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements.geojson",
+    "Chine": "https://raw.githubusercontent.com/deldersveld/topojson/master/countries/china/china-provinces.json", 
+    "Allemagne": "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_medium.geojson",
+    "Canada": "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/canada.geojson",
+    "Australie": "https://raw.githubusercontent.com/rowanhogan/australian-states/master/states_minified.geojson",
+    "Brésil": "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson",
+    "Inde": "https://raw.githubusercontent.com/Subhash9325/GeoJson-Data-of-Indian-States/master/Indian_States", 
+    "Russie": "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/russia.geojson"
+};
+
+// Positions manuelles pour les labels des pays (pour éviter le chevauchement)
 const LABEL_OVERRIDES: Record<string, [number, number]> = {
-    "Croatie": [44.6, 15.6], "Norvège": [62.5, 9.0], "Vietnam": [16.0, 107.5], 
-    "Chili": [-32.0, -71.0], "Japon": [36.0, 138.0], "Israël": [31.3, 35.0],
-    "Italie": [42.5, 12.8], "États-Unis": [39.5, -98.5], "France": [46.5, 2.5],
-    "Indonésie": [-4.0, 115.0], "Philippines": [13.0, 122.0], "Grèce": [39.0, 22.0],
-    "Canada": [56.0, -100.0], "Russie": [60.0, 95.0]
+    "États-Unis": [39.0, -100.0],
+    "Canada": [55.0, -105.0],
+    "Russie": [60.0, 90.0],
+    "Chine": [35.0, 105.0],
+    "Brésil": [-14.0, -55.0],
+    "Australie": [-25.0, 135.0],
+    "Inde": [22.0, 79.0],
+    "Argentine": [-37.0, -65.0],
+    "Algérie": [28.0, 2.0],
+    "République démocratique du Congo": [-3.0, 23.0],
+    "Arabie saoudite": [24.0, 45.0],
+    "Mexique": [23.0, -102.0],
+    "Indonésie": [-4.0, 118.0],
+    "Mongolie": [46.0, 105.0],
+    "Kazakhstan": [48.0, 68.0],
+    "France": [46.5, 2.5],
+    "Espagne": [40.0, -4.0],
+    "Allemagne": [51.0, 10.0],
+    "Pologne": [52.0, 19.0],
+    "Ukraine": [49.0, 31.0],
+    "Turquie": [39.0, 35.0],
+    "Iran": [32.0, 53.0],
+    "Soudan": [16.0, 30.0],
+    "Libye": [27.0, 17.0],
+    "Tchad": [15.0, 18.0],
+    "Niger": [17.0, 8.0],
+    "Mali": [17.0, -4.0],
+    "Afrique du Sud": [-29.0, 24.0],
+    "Colombie": [4.0, -73.0],
+    "Pérou": [-9.0, -75.0]
 };
 
+// --- MAP LABELS COMPONENT (ALWAYS VISIBLE) ---
 const MapLabels = ({ zoom, visibleCountries, ownedTerritories, playerCountry }: { zoom: number, visibleCountries: any[], ownedTerritories: string[], playerCountry: string | null }) => {
-    if (zoom < 3) return null;
-
     return (
         <>
             {visibleCountries.map((c, idx) => {
                 const name = c.name;
-                const isPlayer = playerCountry === name;
-                
-                // Si c'est le joueur ou un territoire possédé, on n'affiche pas le gros label, mais la capitale
-                // Si c'est un pays tiers, on affiche le label.
                 const center = LABEL_OVERRIDES[name] || c.center;
-                const capitalInfo = CAPITAL_DATA[name];
-                
                 if (!center) return null;
 
+                const isMajor = !!LABEL_OVERRIDES[name];
+                if (zoom < 3 && !isMajor) return null; 
+                if (zoom < 5 && !isMajor && name.length > 10) return null;
+
+                const isPlayer = name === playerCountry;
+
                 return (
-                    <React.Fragment key={`label-${name}-${idx}`}>
-                        {zoom < 5 && !ownedTerritories.includes(name) && (
-                            <Marker 
-                                position={center} 
-                                zIndexOffset={100}
-                                icon={L.divIcon({
-                                    className: 'bg-transparent',
-                                    html: `<div style="
-                                        color: rgba(75, 85, 99, 0.7); /* Gris foncé pour lisibilité sur fond clair */
-                                        text-shadow: 0px 0px 2px rgba(255,255,255,0.8); 
-                                        font-weight: bold; 
-                                        font-size: ${zoom < 4 ? '10px' : '12px'};
-                                        text-transform: uppercase;
-                                        text-align: center;
-                                        width: 120px;
-                                        margin-left: -60px;
-                                        pointer-events: none;
-                                        font-family: sans-serif;
-                                    ">${name}</div>`
-                                })}
-                            />
-                        )}
-                    </React.Fragment>
+                    <Marker 
+                        key={`label-${name}-${idx}`}
+                        position={center} 
+                        zIndexOffset={900}
+                        icon={L.divIcon({
+                            className: 'bg-transparent',
+                            html: `<div style="
+                                color: ${isPlayer ? '#15803d' : '#374151'};
+                                text-shadow: 0 0 3px rgba(255,255,255,0.8); 
+                                font-weight: ${isPlayer ? '900' : 'bold'}; 
+                                font-size: ${isMajor ? (zoom < 4 ? '10px' : '14px') : '10px'};
+                                text-transform: uppercase;
+                                text-align: center;
+                                width: 150px;
+                                margin-left: -75px;
+                                pointer-events: none;
+                                font-family: sans-serif;
+                                opacity: 0.9;
+                                letter-spacing: 0.5px;
+                            ">${name}</div>`
+                        })}
+                    />
                 );
             })}
         </>
     );
 };
+
+// --- CAPITAL MARKERS COMPONENT ---
+const CapitalMarkers = ({ zoom, ownedTerritories }: { zoom: number, ownedTerritories: string[] }) => {
+    if (zoom < 4) return null;
+
+    return (
+        <>
+            {Object.entries(CAPITAL_DATA).map(([country, info]) => {
+                return (
+                    <Marker 
+                        key={`cap-${country}`}
+                        position={info.coords}
+                        zIndexOffset={1000}
+                        icon={L.divIcon({
+                            className: 'bg-transparent',
+                            html: `<div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+                                <div style="width: 6px; height: 6px; background: #1f2937; border: 1.5px solid white; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.5);"></div>
+                                ${zoom >= 5 ? `<div style="color: #1f2937; text-shadow: 1px 1px 0 rgba(255,255,255,0.8); font-size: 9px; font-weight: bold; margin-top: 2px; white-space: nowrap; background: rgba(255,255,255,0.4); padding: 0 2px; border-radius: 2px;">${info.city}</div>` : ''}
+                            </div>`
+                        })}
+                    />
+                );
+            })}
+        </>
+    );
+}
 
 const MapController = ({ onZoomChange }: { onZoomChange: (z: number) => void }) => {
     const map = useMapEvents({
@@ -145,8 +225,6 @@ const FlyToCountry = ({ targetCountry, centers }: { targetCountry: string | null
     const map = useMap();
     useEffect(() => {
         if (targetCountry) {
-            // Si c'est une province (ex: "France:Bretagne"), on ignore le flyTo global pour l'instant
-            // ou on fly vers le pays parent.
             const countryName = targetCountry.split(':')[0];
 
             if (LABEL_OVERRIDES[countryName]) {
@@ -167,7 +245,6 @@ const FlyToCountry = ({ targetCountry, centers }: { targetCountry: string | null
 };
 
 // --- PROVINCE DRILL-DOWN LAYER ---
-// Tente de charger un GeoJSON détaillé pour le pays focalisé
 const ProvinceLayer = ({ 
     focusCountry, 
     onProvinceClick, 
@@ -180,45 +257,41 @@ const ProvinceLayer = ({
     playerCountry: string | null
 }) => {
     const [provinceData, setProvinceData] = useState<any>(null);
-    const [loading, setLoading] = useState(false);
     const map = useMap();
 
     useEffect(() => {
         setProvinceData(null);
         if (!focusCountry || focusCountry.includes(':')) return;
 
-        // On essaie de mapper le nom français vers un code ISO-3 ou un nom anglais standard pour l'URL
-        // Note: Ceci est une simplification. Dans une app pro, on utiliserait un map complet ISO3.
-        // Ici on utilise une heuristique basée sur les propriétés du GeoJSON global si dispo, 
-        // ou on ignore si on n'a pas de source fiable.
-        
-        // Pour la démo, on simule le chargement des frontières pour les pays majeurs si on avait une source.
-        // Faute de source CORS-enabled garantie pour *tous* les pays, on va utiliser une astuce:
-        // Si le pays est "France", on charge un fichier spécifique, sinon on ne fait rien pour éviter les erreurs 404.
-        
-        // SOURCE FIABLE (Exemple): https://raw.githubusercontent.com/deldersveld/topojson/master/countries/france/france-departments.json
-        // (Nécessite TopoJSON -> GeoJSON).
-        
-        // Pour répondre à la demande "Dis-moi si tu peux intégrer les provinces", 
-        // Voici l'implémentation de la logique visuelle qui s'activerait SI le fichier est chargé.
-        // J'utilise ici un placeholder vide fonctionnel.
-        
+        const url = PROVINCE_SOURCES[focusCountry];
+        if (url) {
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    setProvinceData(data);
+                })
+                .catch(e => console.error("Province fetch error", e));
+        }
     }, [focusCountry]);
 
     const style = (feature: any) => {
-        const provName = feature.properties.name || feature.properties.NAME_1;
+        const provName = feature.properties.name || feature.properties.NAME_1 || feature.properties.statename;
         const fullId = `${focusCountry}:${provName}`;
         
-        // Check ownership
         const isOwned = ownedTerritories.includes(fullId);
-        const isPlayer = playerCountry === focusCountry && !ownedTerritories.includes(fullId) ? false : true; // Simplification logic
+        
+        // Base fill color
+        let fillColor = "#d1d5db"; // Gris
+        if (ownedTerritories.includes(fullId)) fillColor = "#4ade80"; // Vert clair (annexé)
+        else if (playerCountry === focusCountry) fillColor = "#22c55e"; // Vert joueur
 
         return {
-            fillColor: isOwned ? '#22c55e' : '#e5e7eb', // Vert si possédé, Gris sinon
-            weight: 1,
+            fillColor,
+            weight: 1, // Ligne fine
             opacity: 1,
-            color: '#ffffff',
-            fillOpacity: 0.8
+            color: '#6b7280', // Gris foncé pour la bordure (visible sur fond clair/vert)
+            dashArray: '4, 4', // TRAITILLÉS (DASHED LINES)
+            fillOpacity: 0.9
         };
     };
 
@@ -226,15 +299,16 @@ const ProvinceLayer = ({
 
     return (
         <GeoJSON 
+            key={`prov-${focusCountry}`} 
             data={provinceData} 
             style={style} 
             onEachFeature={(feature, layer) => {
-                const name = feature.properties.name || feature.properties.NAME_1;
+                const name = feature.properties.name || feature.properties.NAME_1 || feature.properties.statename;
                 layer.on('click', (e) => {
                     L.DomEvent.stopPropagation(e);
-                    onProvinceClick(`${focusCountry}:${name}`);
+                    if (name) onProvinceClick(`${focusCountry}:${name}`);
                 });
-                layer.bindTooltip(name, { sticky: true });
+                if (name) layer.bindTooltip(name, { sticky: true, className: 'province-tooltip' });
             }} 
         />
     );
@@ -262,9 +336,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
       data.features.forEach((feature: any) => {
           const name = getFrenchName(feature.properties.name);
           feature.properties.name = name;
-          // Stocker l'ISO3 pour usage futur
-          feature.properties.iso_a3 = feature.id || feature.properties.iso_a3;
-
+          
           if (CAPITAL_DATA[name]) {
               newCenters.push({ name, center: CAPITAL_DATA[name].coords });
           } else if (LABEL_OVERRIDES[name]) {
@@ -299,30 +371,23 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     loadData();
   }, []);
 
-  // STYLE PRINCIPAL PAYS
   const style = (feature: any) => {
     const countryName = feature.properties.name;
-    let fillColor = "#d1d5db"; // Gris neutre (gray-300) par défaut
+    let fillColor = "#d1d5db"; // Gris neutre (gray-300)
     
-    // Logique de couleur
     if (playerCountry === countryName) {
-        // Le pays du joueur est vert (#22c55e = green-500)
-        // Sauf si annexé partiellement (géré par province layer normalement, mais ici base layer)
-        fillColor = "#22c55e";
+        fillColor = "#22c55e"; // Vert joueur
     } else if (ownedTerritories.includes(countryName)) {
-        // Territoire possédé entièrement
-        fillColor = "#4ade80"; // Vert un peu plus clair (green-400)
+        fillColor = "#4ade80"; // Vert annexe
     } else if (neutralTerritories.includes(countryName)) {
-        fillColor = "#ef4444"; // Rouge (Détruit)
-    } else {
-        fillColor = "#d1d5db"; // Gris neutre
+        fillColor = "#ef4444"; // Rouge
     }
 
     return {
       fillColor,
       weight: 1,
       opacity: 1,
-      color: '#ffffff', // Bordures blanches
+      color: '#ffffff',
       dashArray: '',
       fillOpacity: 1
     };
@@ -335,22 +400,12 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         onRegionClick(name);
       },
       mouseover: (e) => {
-        e.target.setStyle({
-          weight: 2,
-          color: '#3b82f6', // Bleu au survol
-          fillOpacity: 0.9
-        });
+        e.target.setStyle({ weight: 2, color: '#3b82f6', fillOpacity: 0.9 });
       },
       mouseout: (e) => {
-        e.target.setStyle({
-             weight: 1,
-             color: '#ffffff',
-             dashArray: '',
-             fillOpacity: 1
-        });
+        e.target.setStyle({ weight: 1, color: '#ffffff', fillOpacity: 1 });
       }
     });
-    layer.bindTooltip(name, { sticky: true, direction: 'center', className: 'country-tooltip' });
   };
 
   if (!geoData) return <div className="text-stone-500 text-center mt-20 flex items-center justify-center h-full">Initialisation satellite...</div>;
@@ -360,21 +415,18 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         zoomControl={false} 
         center={[20, 0]} 
         zoom={3} 
-        style={{ height: '100%', width: '100%', background: '#e0f2fe' }} // Bleu ciel clair (sky-100/200)
+        style={{ height: '100%', width: '100%', background: '#e0f2fe' }} 
         minZoom={2}
-        maxZoom={10} // Zoom max 10
+        maxZoom={10} 
         maxBounds={[[-90, -180], [90, 180]]}
     >
         <MapController onZoomChange={setZoom} />
         <FlyToCountry targetCountry={focusCountry} centers={centers} />
         
-        <GeoJSON 
-            data={geoData} 
-            style={style} 
-            onEachFeature={onEachFeature} 
-        />
+        {/* Base Layer */}
+        <GeoJSON data={geoData} style={style} onEachFeature={onEachFeature} />
         
-        {/* Layer optionnel pour les provinces (Placeholder pour l'instant) */}
+        {/* Drill-down Provinces (TRAITILLÉ) */}
         <ProvinceLayer 
             focusCountry={focusCountry} 
             onProvinceClick={onRegionClick}
@@ -382,12 +434,15 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
             playerCountry={playerCountry}
         />
 
+        {/* Labels & Markers */}
         <MapLabels 
             zoom={zoom} 
             visibleCountries={centers} 
             ownedTerritories={ownedTerritories}
             playerCountry={playerCountry}
         />
+        
+        <CapitalMarkers zoom={zoom} ownedTerritories={ownedTerritories} />
 
         {mapEntities.map((entity) => (
              <Marker

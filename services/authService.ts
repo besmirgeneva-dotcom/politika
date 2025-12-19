@@ -1,3 +1,4 @@
+
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
@@ -23,7 +24,7 @@ if (isConfigValid) {
         const app = initializeApp(firebaseConfig);
         auth = getAuth(app);
         db = getFirestore(app);
-        console.log("Firebase (Auth & Firestore) initialisé avec succès.");
+        // console.log("Firebase (Auth & Firestore) initialisé avec succès."); // Removed log
     } catch (e) {
         console.error("Erreur critique initialisation Firebase:", e);
     }
