@@ -35,11 +35,11 @@ const hasSpaceProgramInitial = (country: string): boolean => SPACE_POWERS.some(c
 const clamp = (value: number): number => Math.max(0, Math.min(100, value));
 
 const StatGauge = ({ label, value, color }: { label: string, value: number, color: string }) => (
-    <div className="flex flex-col gap-1 w-14 md:w-16">
+    <div className="flex flex-col gap-1 w-12 md:w-16">
         <div className="flex justify-between items-center">
-            <span className="font-bold text-stone-400 text-[8px] uppercase tracking-wider truncate">{label}</span>
+            <span className="font-bold text-stone-500 text-[7px] uppercase tracking-tighter truncate">{label}</span>
         </div>
-        <div className="w-full h-1 bg-stone-800 rounded-full overflow-hidden border border-stone-700/50">
+        <div className="w-full h-2 bg-stone-800 rounded-full overflow-hidden border border-stone-700/30">
             <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${value}%` }}></div>
         </div>
     </div>
@@ -152,6 +152,10 @@ const App: React.FC = () => {
               setAppMode('game_active');
               setIsGameMenuOpen(false);
               setCurrentScreen('loading');
+              
+              const unread = data.state.chatHistory.some((m: ChatMessage) => !m.isRead && m.sender !== 'player');
+              setHasUnreadChat(unread);
+              
               showNotification("Partie chargée.");
           }
       } catch (e) { showNotification("Erreur chargement."); }
@@ -161,6 +165,31 @@ const App: React.FC = () => {
   const showNotification = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); }
   const handleExitToDashboard = () => { setIsGameMenuOpen(false); setAppMode('portal_dashboard'); };
   const openLoadMenu = () => setIsLoadMenuOpen(true);
+
+  const handleMarkChatRead = (targets: string[]) => {
+    setGameState(prev => {
+        const sortedTargets = [...targets].sort().join(',');
+        
+        const newHistory = prev.chatHistory.map(msg => {
+            if (msg.isRead || msg.sender === 'player') return msg;
+            
+            const raw = msg.sender === 'player' ? [...msg.targets] : [msg.senderName, ...msg.targets];
+            const flat: string[] = [];
+            raw.forEach(s => s.split(',').forEach(sub => flat.push(normalizeCountryName(sub.trim()))));
+            const msgParticipants = Array.from(new Set(flat.filter(p => p !== prev.playerCountry && p !== ''))).sort().join(',');
+            
+            if (msgParticipants === sortedTargets) {
+                return { ...msg, isRead: true };
+            }
+            return msg;
+        });
+
+        const globalUnread = newHistory.some(m => !m.isRead && m.sender !== 'player');
+        setHasUnreadChat(globalUnread);
+        
+        return { ...prev, chatHistory: newHistory };
+    });
+  };
 
   const handleNextTurn = async () => {
     if (gameState.isProcessing || !gameState.playerCountry || gameState.isGameOver) return;
@@ -223,6 +252,15 @@ const App: React.FC = () => {
         }
     }
 
+    const aiIncomingMessages = result.incomingMessages?.map(m => ({
+        id: `im-${Date.now()}-${Math.random()}`, sender: 'ai' as const, senderName: m.sender,
+        targets: [gameState.playerCountry!], text: m.text, timestamp: Date.now(), isRead: false
+    })) || [];
+
+    if (aiIncomingMessages.length > 0) {
+        setHasUnreadChat(true);
+    }
+
     const newGameState = {
         ...gameState, currentDate: nextDate, turn: gameState.turn + 1,
         ownedTerritories: newOwned, neutralTerritories: newNeutral,
@@ -232,10 +270,7 @@ const App: React.FC = () => {
         militaryPower: clamp(gameState.militaryPower + (result.militaryPowerChange || 0)),
         popularity: clamp(gameState.popularity + (result.popularityChange || 0)),
         corruption: clamp(gameState.corruption + (result.corruptionChange || 0)),
-        chatHistory: [...gameState.chatHistory, ...(result.incomingMessages?.map(m => ({
-            id: `im-${Date.now()}-${Math.random()}`, sender: 'ai' as const, senderName: m.sender,
-            targets: [gameState.playerCountry!], text: m.text, timestamp: Date.now(), isRead: false
-        })) || [])]
+        chatHistory: [...gameState.chatHistory, ...aiIncomingMessages]
     };
 
     setGameState(newGameState);
@@ -264,11 +299,6 @@ const App: React.FC = () => {
       }
   };
 
-  // --- MISSING HANDLERS ---
-
-  /**
-   * Adds the current player input text to the queue of pending orders for the turn.
-   */
   const handleAddOrder = () => {
     if (playerInput.trim()) {
       setPendingOrders(prev => [...prev, playerInput.trim()]);
@@ -276,16 +306,10 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Removes the most recent event from the queue after it has been read.
-   */
   const handleReadEvent = () => {
     setEventQueue(prev => prev.slice(1));
   };
 
-  /**
-   * Fetches strategic suggestions from the AI based on the current game context.
-   */
   const handleGetSuggestions = async (): Promise<string[]> => {
     if (!gameState.playerCountry) return [];
     try {
@@ -293,17 +317,12 @@ const App: React.FC = () => {
         setTokenCount(prev => prev + res.usage);
         return res.suggestions;
     } catch (e) {
-        console.error("Suggestion Error", e);
         return ["Renforcer les frontières", "Développer l'économie"];
     }
   };
 
-  /**
-   * Sends a diplomatic message to targeted countries and handles the AI's response.
-   */
   const handleSendChatMessage = async (targets: string[], message: string) => {
     if (!gameState.playerCountry) return;
-
     const newMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       sender: 'player',
@@ -313,41 +332,23 @@ const App: React.FC = () => {
       timestamp: Date.now(),
       isRead: true
     };
-
-    setGameState(prev => ({
-      ...prev,
-      chatHistory: [...prev.chatHistory, newMessage]
-    }));
-
+    setGameState(prev => ({ ...prev, chatHistory: [...prev.chatHistory, newMessage] }));
     setTypingParticipants(targets);
-    
     try {
         const response = await sendDiplomaticMessage(
-            gameState.playerCountry,
-            targets,
-            message,
-            gameState.chatHistory,
+            gameState.playerCountry, targets, message, gameState.chatHistory,
             { tension: gameState.globalTension, power: gameState.militaryPower },
             aiProvider
         );
-
         setTokenCount(prev => prev + response.usage);
-
         const aiMessages: ChatMessage[] = response.messages.map((m, idx) => ({
-            id: `aimsg-${Date.now()}-${idx}`,
-            sender: 'ai',
-            senderName: m.sender,
-            targets: [gameState.playerCountry!],
-            text: m.text,
-            timestamp: Date.now(),
-            isRead: false
+            id: `aimsg-${Date.now()}-${idx}`, sender: 'ai', senderName: m.sender,
+            targets: [gameState.playerCountry!], text: m.text, timestamp: Date.now(), isRead: false
         }));
+        
+        if (aiMessages.length > 0) setHasUnreadChat(true);
 
-        setGameState(prev => ({
-            ...prev,
-            chatHistory: [...prev.chatHistory, ...aiMessages]
-        }));
-        setHasUnreadChat(true);
+        setGameState(prev => ({ ...prev, chatHistory: [...prev.chatHistory, ...aiMessages] }));
     } catch (e) {
         console.error("Chat Error", e);
     } finally {
@@ -355,42 +356,17 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Resets the game state and starts a new GeoSim session.
-   */
   const launchGeoSim = () => {
     const newGameId = `game-${Date.now()}`;
     setGameState({
-      gameId: newGameId,
-      currentDate: INITIAL_DATE,
-      playerCountry: null,
-      ownedTerritories: [],
-      neutralTerritories: [],
-      mapEntities: [],
-      infrastructure: {},
-      turn: 1,
-      events: [],
-      isProcessing: false,
-      globalTension: 20,
-      economyHealth: 50,
-      militaryPower: 50,
-      popularity: 60,
-      corruption: 30,
-      hasNuclear: false,
-      hasSpaceProgram: false,
-      militaryRank: 100,
-      chatHistory: [],
-      chaosLevel: 'normal',
-      alliance: null,
-      isGameOver: false,
-      gameOverReason: null
+      gameId: newGameId, currentDate: INITIAL_DATE, playerCountry: null, ownedTerritories: [], neutralTerritories: [],
+      mapEntities: [], infrastructure: {}, turn: 1, events: [], isProcessing: false, globalTension: 20,
+      economyHealth: 50, militaryPower: 50, popularity: 60, corruption: 30, hasNuclear: false,
+      hasSpaceProgram: false, militaryRank: 100, chatHistory: [], chaosLevel: 'normal', alliance: null,
+      isGameOver: false, gameOverReason: null
     });
-    setFullHistory([]);
-    setEventQueue([]);
-    setTokenCount(0);
-    setShowStartModal(true);
-    setAppMode('game_active');
-    setCurrentScreen('splash');
+    setFullHistory([]); setEventQueue([]); setTokenCount(0); setHasUnreadChat(false);
+    setShowStartModal(true); setAppMode('game_active'); setCurrentScreen('splash');
   };
 
   const toggleWindow = (win: any) => setActiveWindow(activeWindow === win ? 'none' : win);
@@ -447,46 +423,55 @@ const App: React.FC = () => {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-stone-900 font-sans">
         <div className="absolute inset-0 z-0">
-            <WorldMap playerCountry={gameState.playerCountry} ownedTerritories={gameState.ownedTerritories} neutralTerritories={gameState.neutralTerritories} mapEntities={gameState.mapEntities} onRegionClick={handleRegionSelect} focusCountry={focusCountry} />
+            <WorldMap 
+              playerCountry={gameState.playerCountry} 
+              ownedTerritories={gameState.ownedTerritories} 
+              neutralTerritories={gameState.neutralTerritories} 
+              mapEntities={gameState.mapEntities} 
+              onRegionClick={handleRegionSelect} 
+              focusCountry={focusCountry} 
+              hasAlliance={!!gameState.alliance}
+            />
         </div>
 
         {activeWindow !== 'none' && <div className="absolute inset-0 z-40" onClick={() => setActiveWindow('none')}></div>}
 
         {!gameState.isGameOver && gameState.playerCountry && (
             <>
-                {/* HUD Jauges Gauche (Compact, Hauteur h-10) */}
-                <div className="absolute top-6 left-6 z-30 flex flex-col gap-2 pointer-events-none">
-                    <div className="bg-stone-900/90 backdrop-blur-md h-10 px-3 rounded-full border border-stone-700 shadow-2xl pointer-events-auto flex flex-row gap-3 items-center">
+                {/* HUD Jauges Gauche (Épaissi et labels mis à jour) */}
+                <div className="absolute top-4 left-4 z-30 flex flex-col gap-2 pointer-events-none">
+                    <div className="bg-stone-900/95 backdrop-blur-sm h-11 px-3 rounded-full border border-stone-700 shadow-2xl pointer-events-auto flex flex-row gap-2.5 items-center">
                         <StatGauge label="Tension" value={gameState.globalTension} color="bg-red-500" />
-                        <StatGauge label="Éco" value={gameState.economyHealth} color="bg-emerald-500" />
+                        <StatGauge label="Economie" value={gameState.economyHealth} color="bg-emerald-500" />
                         <StatGauge label="Armée" value={gameState.militaryPower} color="bg-blue-500" />
-                        <StatGauge label="Pop" value={gameState.popularity} color="bg-purple-500" />
+                        <StatGauge label="Population" value={gameState.popularity} color="bg-purple-500" />
+                        <StatGauge label="Corruption" value={gameState.corruption} color="bg-orange-500" />
                         <div className="h-4 w-px bg-stone-700 mx-0.5"></div>
-                        <div className="flex items-center gap-2">
-                            {gameState.hasNuclear && <span className="text-yellow-500 text-sm animate-pulse">☢️</span>}
-                            {gameState.alliance && <span className="text-indigo-400 text-sm">🛡️</span>}
+                        <div className="flex items-center gap-1.5">
+                            {gameState.hasNuclear && <span className="text-yellow-500 text-[10px] animate-pulse">☢️</span>}
+                            {gameState.alliance && <span className="text-indigo-400 text-[10px]">🛡️</span>}
                         </div>
                     </div>
                 </div>
 
-                {/* HUD Profil Droite (Même hauteur h-10, plus compact) */}
-                <div className="absolute top-6 right-6 z-30 flex flex-row items-center gap-2 pointer-events-none">
-                    <div className="bg-stone-900/90 backdrop-blur-md h-10 pl-3 pr-1.5 rounded-full border border-stone-700 shadow-2xl pointer-events-auto flex items-center gap-2">
+                {/* HUD Profil Droite (Même hauteur, aligné) */}
+                <div className="absolute top-4 right-4 z-30 flex flex-row items-center gap-2 pointer-events-none">
+                    <div className="bg-stone-900/95 backdrop-blur-sm h-11 pl-4 pr-2 rounded-full border border-stone-700 shadow-2xl pointer-events-auto flex items-center gap-3">
                         <div className="flex flex-col items-end">
-                             <div className="text-emerald-400 text-[7px] font-mono px-1 rounded bg-black/30 border border-emerald-900/50">T:{tokenCount}</div>
+                             <div className="text-emerald-400 text-[7px] font-mono px-1 rounded bg-black/50 border border-emerald-900/30">T:{tokenCount}</div>
                         </div>
                         <div className="flex flex-col items-end cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setIsGameMenuOpen(true)}>
-                            <span className="text-[7px] text-stone-400 uppercase font-bold tracking-tighter">PRÉSIDENT</span>
-                            <span className="text-[10px] font-bold text-white leading-none uppercase truncate max-w-[80px]">{gameState.playerCountry}</span>
+                            <span className="text-[6px] text-stone-500 uppercase font-black leading-none mb-0.5 tracking-tighter">PRÉSIDENT</span>
+                            <span className="text-[10px] font-black text-white leading-none uppercase truncate max-w-[80px]">{gameState.playerCountry}</span>
                         </div>
-                        <img src={getFlagUrl(gameState.playerCountry)} className="w-7 h-7 rounded-full border border-stone-600 object-cover cursor-pointer" onClick={() => setIsGameMenuOpen(true)} />
+                        <img src={getFlagUrl(gameState.playerCountry)} className="w-8 h-8 rounded-full border border-stone-700 object-cover cursor-pointer" onClick={() => setIsGameMenuOpen(true)} />
                     </div>
                 </div>
                 
-                {/* GAME MENU (Centré au milieu de l'écran) */}
+                {/* GAME MENU (CENTRE AU MILIEU) */}
                 {isGameMenuOpen && (
-                    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsGameMenuOpen(false)}>
-                        <div className="bg-stone-900 border border-stone-600 shadow-2xl rounded-2xl p-6 w-full max-w-xs flex flex-col gap-5 animate-scale-in" onClick={e => e.stopPropagation()}>
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setIsGameMenuOpen(false)}>
+                        <div className="bg-stone-900 border border-stone-600 shadow-2xl rounded-2xl p-6 w-full max-w-xs flex flex-col gap-5" onClick={e => e.stopPropagation()}>
                             <div className="text-center">
                                 <h2 className="text-lg font-black text-white uppercase tracking-widest">Menu du Jeu</h2>
                             </div>
@@ -509,11 +494,11 @@ const App: React.FC = () => {
                 )}
                 
                 {isLoadMenuOpen && (
-                    <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={() => setIsLoadMenuOpen(false)}>
-                        <div className="bg-stone-900 p-6 rounded-2xl w-full max-w-sm border border-stone-700" onClick={e => e.stopPropagation()}>
-                            <h2 className="text-white font-bold mb-4 uppercase">Charger</h2>
-                            <div className="space-y-2 max-h-60 overflow-y-auto">
-                                {availableSaves.map(s => <div key={s.id} onClick={() => loadGameById(s.id)} className="p-2 bg-stone-800 text-white rounded cursor-pointer hover:bg-stone-700">{s.country} - Tour {s.turn}</div>)}
+                    <div className="fixed inset-0 z-[110] bg-black/80 flex items-center justify-center p-4" onClick={() => setIsLoadMenuOpen(false)}>
+                        <div className="bg-stone-900 p-6 rounded-2xl w-full max-w-sm border border-stone-700 shadow-2xl" onClick={e => e.stopPropagation()}>
+                            <h2 className="text-white font-bold mb-4 uppercase text-center">Sauvegardes</h2>
+                            <div className="space-y-2 max-h-60 overflow-y-auto pr-1 scrollbar-hide">
+                                {availableSaves.length === 0 ? <p className="text-stone-500 text-xs text-center py-4">Aucune sauvegarde.</p> : availableSaves.map(s => <div key={s.id} onClick={() => loadGameById(s.id)} className="p-3 bg-stone-800 text-white rounded-lg cursor-pointer hover:bg-stone-700 border border-stone-700 flex justify-between items-center"><span className="text-xs font-bold">{s.country}</span><span className="text-[10px] text-stone-500">T:{s.turn}</span></div>)}
                             </div>
                         </div>
                     </div>
@@ -522,7 +507,7 @@ const App: React.FC = () => {
                 <DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing} />
                 <EventLog isOpen={activeWindow === 'events'} onClose={() => toggleWindow('events')} eventQueue={eventQueue} onReadEvent={() => eventQueue.length > 0 ? handleReadEvent() : setActiveWindow('none')} playerAction={playerInput} setPlayerAction={setPlayerInput} onAddOrder={handleAddOrder} pendingOrders={pendingOrders} isProcessing={gameState.isProcessing} onGetSuggestions={handleGetSuggestions} turn={gameState.turn} />
                 <HistoryLog isOpen={activeWindow === 'history'} onClose={() => toggleWindow('history')} history={fullHistory} />
-                <ChatInterface isOpen={activeWindow === 'chat'} onClose={() => toggleWindow('chat')} playerCountry={gameState.playerCountry} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={(t) => setHasUnreadChat(false)} />
+                <ChatInterface isOpen={activeWindow === 'chat'} onClose={() => toggleWindow('chat')} playerCountry={gameState.playerCountry} chatHistory={gameState.chatHistory} onSendMessage={handleSendChatMessage} isProcessing={gameState.isProcessing} allCountries={ALL_COUNTRIES_LIST} typingParticipants={typingParticipants} onMarkRead={handleMarkChatRead} />
                 
                 <div className="absolute bottom-6 left-6 z-30 flex gap-2">
                     <button onClick={() => toggleWindow('events')} className="bg-white text-stone-800 px-4 py-2 rounded-xl border shadow font-bold text-sm h-12 flex items-center gap-2"><span>✍️</span> Ordres {eventQueue.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{eventQueue.length}</span>}</button>

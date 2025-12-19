@@ -4,7 +4,7 @@ import { MapContainer, GeoJSON, Marker, Popup, useMapEvents, useMap } from 'reac
 import L from 'leaflet';
 import * as turf from '@turf/turf';
 import { MapEntity, MapEntityType } from '../types';
-import { getFrenchName } from '../constants';
+import { getFrenchName, LANDLOCKED_COUNTRIES, NUCLEAR_POWERS } from '../constants';
 
 // --- ALGORITHME POINT-IN-POLYGON (Ray Casting) ---
 const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
@@ -56,21 +56,19 @@ const findVisualCenter = (feature: any): [number, number] | null => {
 
 // --- CUSTOM MARKERS ---
 const getEntityLabel = (type: MapEntityType, customLabel?: string) => {
-    // Si un label custom existe et n'est pas une commande technique
-    if (customLabel && !customLabel.toLowerCase().includes('build_') && customLabel !== 'Base Militaire' && customLabel !== 'Système de Défense' && customLabel !== 'Base Aérienne') {
-        let prefix = "";
-        if (type === 'military_base') prefix = "Base Militaire: ";
-        if (type === 'air_base') prefix = "Base Aérienne: ";
-        if (type === 'defense_system') prefix = "Défense: ";
-        return `${prefix}${customLabel}`;
+    let typeName = "";
+    switch(type) {
+        case 'military_base': typeName = 'Base militaire'; break;
+        case 'air_base': typeName = 'Base aérienne'; break;
+        case 'defense_system': typeName = 'Système de défense'; break;
+        default: typeName = 'Installation';
     }
 
-    switch(type) {
-        case 'military_base': return 'Base Militaire';
-        case 'air_base': return 'Base Aérienne';
-        case 'defense_system': return 'Système de Défense';
-        default: return 'Installation';
+    if (customLabel && !customLabel.toLowerCase().includes('build_') && !customLabel.includes('Base military') && customLabel !== typeName) {
+        return `${typeName} (${customLabel})`;
     }
+
+    return typeName;
 }
 
 const getEntityColor = (type: MapEntityType) => {
@@ -109,7 +107,7 @@ const createDotIcon = (color: string, type: MapEntityType, showLabel: boolean, l
           color: white; 
           text-shadow: 0px 0px 3px black, 0px 0px 5px black;
           pointer-events: none;
-          z-index: 10;
+          z-index: 1200;
         ">${labelText}</div>
         ` : ''}
       </div>
@@ -128,7 +126,7 @@ const LABEL_OVERRIDES: Record<string, [number, number]> = {
     "France": [46.8, 2.5], "Chine": [35.5, 104.0], "Australie": [-25.0, 134.0], "Inde": [22.0, 78.0]
 };
 
-const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, neutralTerritories }: { zoom: number, visibleCountries: any[], playerCountry: string | null, ownedTerritories: string[], neutralTerritories: string[] }) => {
+const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, neutralTerritories, hasAlliance }: { zoom: number, visibleCountries: any[], playerCountry: string | null, ownedTerritories: string[], neutralTerritories: string[], hasAlliance: boolean }) => {
     const MAJOR_POWERS = ["États-Unis", "Russie", "Chine", "Brésil", "Australie", "Canada", "Inde", "France"];
     return (
         <>
@@ -145,14 +143,35 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, ne
                 const isMajor = MAJOR_POWERS.includes(name);
                 if (zoom < 3 && !isMajor) return null; 
                 const fontSize = zoom < 4 ? '9px' : '11px';
+                
+                const opacity = zoom > 6 ? 0.4 : 0.8;
+
+                // Strategic Info
+                const hasSeaAccess = !LAND_POL_LIST.includes(name);
+                const isNuclear = NUCLEAR_POWERS.includes(name);
+                const showSeaIcon = zoom >= 3 && hasSeaAccess;
+                const showNucIcon = zoom >= 3 && isNuclear;
+                const showAllIcon = isPlayer && hasAlliance;
+
                 return (
                     <Marker 
                         key={`label-${name}-${idx}`}
                         position={center} 
-                        zIndexOffset={900}
+                        zIndexOffset={800}
                         icon={L.divIcon({
                             className: 'bg-transparent',
-                            html: `<div style="color: ${displayColor}; text-shadow: 0 0 3px rgba(255,255,255,0.9); font-weight: bold; font-size: ${fontSize}; text-transform: uppercase; text-align: center; width: 160px; margin-left: -80px; pointer-events: none;">${displayName}</div>`
+                            html: `
+                                <div style="display: flex; flex-direction: column; align-items: center; width: 160px; margin-left: -80px; pointer-events: none;">
+                                    <div style="color: ${displayColor}; text-shadow: 0 0 3px rgba(255,255,255,0.9); font-weight: bold; font-size: ${fontSize}; text-transform: uppercase; text-align: center; opacity: ${opacity}; transition: opacity 0.3s;">
+                                        ${displayName}
+                                    </div>
+                                    <div style="display: flex; gap: 3px; margin-top: 2px; opacity: ${opacity};">
+                                        ${showSeaIcon ? '<span style="font-size: 9px;" title="Accès mer">⚓</span>' : ''}
+                                        ${showNucIcon ? '<span style="font-size: 9px;" title="Nucléaire">☢️</span>' : ''}
+                                        ${showAllIcon ? '<span style="font-size: 9px;" title="Alliance">🛡️</span>' : ''}
+                                    </div>
+                                </div>
+                            `
                         })}
                     />
                 );
@@ -160,6 +179,9 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, ne
         </>
     );
 };
+
+// Local copy for Sea Access logic if needed
+const LAND_POL_LIST = LANDLOCKED_COUNTRIES;
 
 const CapitalMarkers = ({ zoom, ownedTerritories, playerCountry }: { zoom: number, ownedTerritories: string[], playerCountry: string | null }) => {
     const [capitals, setCapitals] = useState<any[]>([]);
@@ -180,7 +202,7 @@ const CapitalMarkers = ({ zoom, ownedTerritories, playerCountry }: { zoom: numbe
                     <Marker 
                         key={`cap-${info.country}-${idx}`}
                         position={info.coords}
-                        zIndexOffset={1000}
+                        zIndexOffset={900}
                         icon={L.divIcon({
                             className: 'bg-transparent',
                             html: `<div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
@@ -218,9 +240,10 @@ interface WorldMapProps {
   neutralTerritories?: string[];
   mapEntities: MapEntity[];
   focusCountry: string | null;
+  hasAlliance?: boolean;
 }
 
-const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, neutralTerritories = [], mapEntities, focusCountry }) => {
+const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, ownedTerritories, neutralTerritories = [], mapEntities, focusCountry, hasAlliance = false }) => {
   const [geoData, setGeoData] = useState<any>(null);
   const [zoom, setZoom] = useState(3);
   const [centers, setCenters] = useState<{name: string, center: [number, number]}[]>([]);
@@ -286,14 +309,14 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         <MapController onZoomChange={setZoom} />
         <FlyToCountry targetCountry={focusCountry} centers={centers} />
         <GeoJSON key={`map-${ownedTerritories.length}-${neutralTerritories.length}`} data={displayGeoData || geoData} style={style} onEachFeature={(f, l) => l.on('click', () => onRegionClick(f.properties.name))} />
-        <MapLabels zoom={zoom} visibleCountries={centers} playerCountry={playerCountry} ownedTerritories={ownedTerritories} neutralTerritories={neutralTerritories} />
+        <MapLabels zoom={zoom} visibleCountries={centers} playerCountry={playerCountry} ownedTerritories={ownedTerritories} neutralTerritories={neutralTerritories} hasAlliance={hasAlliance} />
         <CapitalMarkers zoom={zoom} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
         {mapEntities.map((entity) => {
              if (zoom < 6) return null;
              const pos = getMarkerPosition(entity);
              if (!pos) return null;
              return (
-                <Marker key={entity.id} position={pos} icon={createDotIcon(getEntityColor(entity.type), entity.type, zoom >= 8, entity.label)}>
+                <Marker key={entity.id} position={pos} icon={createDotIcon(getEntityColor(entity.type), entity.type, zoom >= 8, entity.label)} zIndexOffset={1100}>
                     <Popup>{getEntityLabel(entity.type, entity.label)}</Popup>
                 </Marker>
              );

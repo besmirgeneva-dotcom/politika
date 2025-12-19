@@ -103,7 +103,8 @@ export const AI_NAME_CORRECTIONS: Record<string, string> = {
     "Germany": "Allemagne",
     "Italy": "Italie",
     "Spain": "Espagne",
-    "Greece": "Grèce", // Fix Grèce
+    "Greece": "Grèce", 
+    "Albania": "Albanie",
     "Japan": "Japon",
     "South Korea": "Corée du Sud",
     "North Korea": "Corée du Nord",
@@ -118,14 +119,14 @@ export const AI_NAME_CORRECTIONS: Record<string, string> = {
     "Iran": "Iran",
     "Israel": "Israël",
     "Egypt": "Égypte",
-    "Republic of Kosovo": "Kosovo", // Fix Kosovo
+    "Republic of Kosovo": "Kosovo", 
     "Kosovo": "Kosovo",
     "Macedonia": "Macédoine du Nord",
-    "Macédoine": "Macédoine du Nord", // Fix pour Macédoine
-    "North Macedonia": "Macédoine du Nord", // Fix pour nom complet anglais
+    "Macédoine": "Macédoine du Nord", 
+    "North Macedonia": "Macédoine du Nord", 
     "Republic of Macedonia": "Macédoine du Nord",
-    "The Former Yugoslav Republic of Macedonia": "Macédoine du Nord",
-    "Montenegro": "Monténégro", // Fix pour Montenegro (anglais -> français)
+    "The Former Yugoslav Yugoslav Republic of Macedonia": "Macédoine du Nord",
+    "Montenegro": "Monténégro", 
     "Bosnia": "Bosnie-Herzégovine",
     "Bosnia and Herzegovina": "Bosnie-Herzégovine",
     "Syria": "Syrie",
@@ -150,6 +151,7 @@ export const normalizeCountryName = (name: string): string => {
 // --- GEOJSON MAPPING ---
 // Mapping spécifique pour convertir les noms anglais du GeoJSON en noms français de l'app
 const GEOJSON_TO_FRENCH: Record<string, string> = {
+    "Albania": "Albanie",
     "United States of America": "États-Unis",
     "United States": "États-Unis",
     "United Kingdom": "Royaume-Uni",
@@ -261,7 +263,6 @@ const GEOJSON_TO_FRENCH: Record<string, string> = {
     "Montenegro": "Monténégro",
     "Kosovo": "Kosovo",
     "Macedonia": "Macédoine du Nord",
-    "Albania": "Albanie",
     "Bulgaria": "Bulgarie",
     "Bosnia and Herzegovina": "Bosnie-Herzégovine",
     "Croatia": "Croatie",
