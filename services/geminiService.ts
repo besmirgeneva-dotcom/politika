@@ -320,12 +320,28 @@ export const sendDiplomaticMessage = async (
         .map(msg => `${msg.sender === 'player' ? 'Moi' : msg.senderName}:${msg.text}`)
         .join('|');
 
+    // NOUVEAU: Stringify du contexte pour injection réelle
+    const contextStr = JSON.stringify(context);
+
+    // Prompt amélioré pour forcer l'IA à utiliser le contexte
     const prompt = `
-    Role:${targets.join(',')}.
-    Moi:${playerCountry}.
-    Chat:${conv}
-    Msg:"${message}"
-    JSON minifié:[{"s":"Pays","t":"Court"}]
+    CONTEXTE GLOBAL JEU: ${contextStr}
+    (Utilise ces stats pour déterminer si les interlocuteurs doivent avoir peur, être respectueux ou méprisants).
+    
+    INTERLOCUTEURS (IA): ${targets.join(',')}
+    JOUEUR (Moi): ${playerCountry}
+    
+    HISTORIQUE CONVERSATION:
+    ${conv}
+    
+    NOUVEAU MESSAGE DU JOUEUR: "${message}"
+    
+    TÂCHE: Répondre en tant que les pays ciblés (INTERLOCUTEURS). 
+    - Si le joueur est puissant/nucléaire (voir contexte), sois prudent.
+    - Si le joueur est faible, sois arrogant.
+    - Sois bref et direct.
+    
+    FORMAT SORTIE: JSON minifié: [{"s":"NomPays","t":"MessageCourt"}]
     `;
 
     const CHAT_SCHEMA = {

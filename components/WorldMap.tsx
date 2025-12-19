@@ -108,7 +108,7 @@ const getEntityLabel = (type: MapEntityType) => {
     switch(type) {
         case 'military_base': return 'Base';
         case 'defense_system': return 'Défense';
-        default: return type;
+        default: return 'Site';
     }
 }
 
@@ -214,10 +214,7 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, ne
                 const isNeutral = neutralTerritories.includes(name);
                 
                 // MASQUAGE DU NOM SI ANNEXÉ MAIS PAS LE COEUR DU PAYS JOUEUR
-                // Si je suis la France, et que je possède l'Espagne :
-                // isPlayer = false (car Espagne != France)
-                // isOwned = true
-                // Donc on retourne null pour ne pas afficher "Espagne"
+                // C'est ici que le nom du pays disparait lors d'une annexion, laissant la place à la capitale (via CapitalMarkers)
                 if (isOwned && !isPlayer) return null;
 
                 const displayName = isNeutral ? "PAYS VIDE" : name;
@@ -259,7 +256,7 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, ne
     );
 };
 
-const CapitalMarkers = ({ zoom }: { zoom: number }) => {
+const CapitalMarkers = ({ zoom, ownedTerritories, playerCountry }: { zoom: number, ownedTerritories: string[], playerCountry: string | null }) => {
     const [capitals, setCapitals] = useState<any[]>([]);
 
     useEffect(() => {
@@ -285,11 +282,21 @@ const CapitalMarkers = ({ zoom }: { zoom: number }) => {
         fetchCapitals();
     }, []);
 
-    if (zoom < 4) return null;
+    // Affichage amélioré :
+    // On affiche les capitales à partir de zoom 4 en général.
+    // MAIS, si c'est un territoire annexé (appartient au joueur mais n'est pas son pays d'origine),
+    // on l'affiche même à zoom 3 pour servir d'étiquette principale (puisque le nom du pays est masqué).
+    
+    if (zoom < 3) return null;
 
     return (
         <>
             {capitals.map((info, idx) => {
+                const isAnnexed = playerCountry && ownedTerritories.includes(info.country) && info.country !== playerCountry;
+                
+                // Si zoom < 4, on n'affiche QUE les capitales des territoires annexés pour qu'ils aient une étiquette
+                if (zoom < 4 && !isAnnexed) return null;
+
                 return (
                     <Marker 
                         key={`cap-${info.country}-${idx}`}
@@ -298,15 +305,16 @@ const CapitalMarkers = ({ zoom }: { zoom: number }) => {
                         icon={L.divIcon({
                             className: 'bg-transparent',
                             html: `<div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
-                                <div style="width: 5px; height: 5px; background: #1f2937; border: 1px solid white; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.5);"></div>
-                                ${zoom > 4 ? `
+                                <div style="width: ${isAnnexed ? '6px' : '5px'}; height: ${isAnnexed ? '6px' : '5px'}; background: ${isAnnexed ? '#15803d' : '#1f2937'}; border: 1px solid white; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.5);"></div>
+                                ${zoom > 4 || isAnnexed ? `
                                 <div style="
-                                    color: #4b5563; 
+                                    color: ${isAnnexed ? '#064e3b' : '#4b5563'}; 
                                     text-shadow: 1px 1px 0 rgba(255,255,255,0.9); 
-                                    font-size: 8px; 
+                                    font-size: ${isAnnexed ? '10px' : '8px'}; 
+                                    font-weight: ${isAnnexed ? 'bold' : 'normal'};
                                     margin-top: 1px; 
                                     white-space: nowrap; 
-                                    background: rgba(255,255,255,0.4); 
+                                    background: rgba(255,255,255,0.6); 
                                     padding: 0 2px; 
                                     border-radius: 2px;
                                 ">${info.city}</div>` : ''}
@@ -559,7 +567,11 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
             neutralTerritories={neutralTerritories}
         />
         
-        <CapitalMarkers zoom={zoom} />
+        <CapitalMarkers 
+            zoom={zoom} 
+            ownedTerritories={ownedTerritories}
+            playerCountry={playerCountry}
+        />
 
         {mapEntities.map((entity) => {
              if (zoom < 6) return null;
