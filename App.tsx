@@ -140,7 +140,19 @@ const App: React.FC = () => {
     
     setGameState(prev => ({ ...prev, isProcessing: true }));
     
-    const entitiesSummary = gameState.mapEntities.length > 0 ? gameState.mapEntities.map(e => `${e.type} en ${e.country}`).join('; ') : "Aucune installation.";
+    // OPTIMISATION TOKENS: Regroupement des entités pour éviter une liste kilométrique
+    const entitiesSummary = gameState.mapEntities.length > 0 
+        ? Object.entries(gameState.mapEntities.reduce((acc, e) => {
+            if (!acc[e.country]) acc[e.country] = {};
+            acc[e.country][e.type] = (acc[e.country][e.type] || 0) + 1;
+            return acc;
+        }, {} as Record<string, Record<string, number>>))
+        .map(([country, types]) => {
+            const typeStr = Object.entries(types).map(([t, c]) => `${t} x${c}`).join(', ');
+            return `${country}[${typeStr}]`;
+        }).join('; ')
+        : "Aucune installation.";
+
     const recentChat = gameState.chatHistory.slice(-5).map(m => `${m.senderName}: ${m.text}`).join(' | ');
 
     // --- APPEL IA ---

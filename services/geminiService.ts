@@ -224,7 +224,12 @@ export const simulateTurn = async (
     territoryStr = `${core} (+${ownedTerritories.length - 3} others)`;
   }
 
-  const neutralStr = neutralTerritories.length > 0 ? neutralTerritories.join(',') : "Aucun";
+  // OPTIMISATION TOKENS: On tronque la liste des terres désolées si elle est trop longue
+  const neutralStr = neutralTerritories.length > 0 
+      ? (neutralTerritories.length > 20 
+          ? `${neutralTerritories.slice(0, 20).join(',')} (+${neutralTerritories.length - 20} déserts)` 
+          : neutralTerritories.join(',')) 
+      : "Aucun";
   
   const prompt = `
     CONTEXTE:
