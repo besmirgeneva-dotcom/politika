@@ -45,8 +45,8 @@ const MINIFIED_SCHEMA = {
         items: {
             type: Type.OBJECT,
             properties: {
-                t: { type: Type.STRING, enum: ['annexation', 'annex_province', 'build_base', 'build_defense', 'remove_entity', 'dissolve'] },
-                tc: { type: Type.STRING }, // targetCountry or "Country:Province"
+                t: { type: Type.STRING, enum: ['annexation', 'build_base', 'build_defense', 'remove_entity', 'dissolve'] },
+                tc: { type: Type.STRING }, // targetCountry
                 no: { type: Type.STRING }, // newOwner
                 lat: { type: Type.NUMBER },
                 lng: { type: Type.NUMBER },

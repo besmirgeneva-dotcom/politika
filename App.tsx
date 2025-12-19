@@ -784,13 +784,6 @@ const App: React.FC = () => {
                     if (hasNuclearArsenal(target)) newHasNuclear = true;
                     annexationHappened = true; // DETECT ANNEXATION FOR STATS
                 }
-            } else if (update.type === 'annex_province') {
-                const targetFull = update.targetCountry; 
-                if (!newOwnedTerritories.includes(targetFull)) {
-                     newOwnedTerritories.push(targetFull);
-                     showNotification(`Région annexée: ${targetFull}`);
-                     annexationHappened = true; // DETECT ANNEXATION FOR STATS
-                }
             } else if (update.type === 'remove_entity') {
                 newEntities = newEntities.filter(e => e.id !== update.entityId && e.label !== update.label);
             } else if (update.type === 'build_base' || update.type === 'build_defense') {
@@ -1045,18 +1038,9 @@ const App: React.FC = () => {
   };
 
   const handleRegionSelect = (region: string) => {
-    // Si format "Pays:Province", on gère différemment
+    // Si format "Pays:Province", on ignore simplement car on a supprimé les provinces
     if (region.includes(':')) {
-        const [country, province] = region.split(':');
-        // Si on ne joue pas encore, on sélectionne le pays parent
-        if (!gameState.playerCountry) {
-            setPendingCountry(country);
-            setShowStartModal(true);
-        } else {
-            // Sinon on fait un focus sur le pays
-            setFocusCountry(country);
-        }
-        return;
+        return; 
     }
 
     if (!gameState.playerCountry) {

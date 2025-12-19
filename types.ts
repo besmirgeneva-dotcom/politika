@@ -83,8 +83,8 @@ export interface SimulationResponse {
   nuclearAcquired?: boolean; // NOUVEAU: L'IA valide l'obtention de la bombe
   // Mises à jour visuelles (Carte)
   mapUpdates?: {
-    type: 'annexation' | 'annex_province' | 'build_base' | 'build_defense' | 'remove_entity' | 'dissolve'; // NOUVEAU: annex_province
-    targetCountry: string; // Si annex_province, format "Pays:Province"
+    type: 'annexation' | 'build_base' | 'build_defense' | 'remove_entity' | 'dissolve';
+    targetCountry: string;
     newOwner?: string;
     lat?: number;
     lng?: number;
