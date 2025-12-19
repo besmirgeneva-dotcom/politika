@@ -220,10 +220,10 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
     try {
         if (!HUGGINGFACE_API_KEY) throw new Error("No Hugging Face Key");
         
-        // Using Mistral-7B-Instruct-v0.3 via Inference API which is generally free and reliable for JSON
-        const MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"; 
+        // Using Zephyr-7b-beta which is generally available on free inference API and good with JSON
+        const MODEL_ID = "HuggingFaceH4/zephyr-7b-beta"; 
         
-        const fullPrompt = `<s>[INST] ${system} \n\n ${prompt} [/INST]`;
+        const fullPrompt = `<|system|>\n${system}\n</s>\n<|user|>\n${prompt}\n</s>\n<|assistant|>\n`;
 
         const response = await fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
             method: "POST",
@@ -234,7 +234,7 @@ const callHuggingFace = async (prompt: string, system: string): Promise<string> 
             body: JSON.stringify({
                 inputs: fullPrompt,
                 parameters: {
-                    max_new_tokens: 2000,
+                    max_new_tokens: 1500,
                     return_full_text: false, // Only get the generated part
                     temperature: 0.7,
                     do_sample: true
@@ -311,7 +311,7 @@ export const simulateTurn = async (
   
   if (provider === 'huggingface' && HUGGINGFACE_API_KEY) {
       try {
-          const sys = SYSTEM_INSTRUCTION + " IMPORTANT: REPOND UNIQUEMENT EN JSON.";
+          const sys = SYSTEM_INSTRUCTION + " IMPORTANT: Repond uniquement en JSON valide minifié.";
           const jsonStr = await callHuggingFace(prompt, sys);
           return mapMinifiedToFull(JSON.parse(jsonStr));
       } catch (e) { console.warn("HF fail, fallback Gemini", e); }
@@ -380,7 +380,7 @@ export const sendDiplomaticMessage = async (
 
     if (provider === 'huggingface' && HUGGINGFACE_API_KEY) {
         try {
-            const sys = "Tu es chef d'état. Repond uniquement en JSON: [{'s':'Pays','t':'Message'}]";
+            const sys = "Tu es chef d'état. Repond uniquement en JSON valide: [{'s':'Pays','t':'Message'}]";
             const jsonStr = await callHuggingFace(prompt, sys);
             const raw = JSON.parse(jsonStr);
             const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
@@ -422,7 +422,7 @@ export const getStrategicSuggestions = async (
              return p.s || p.suggestions || [];
         }
         if (provider === 'huggingface' && HUGGINGFACE_API_KEY) {
-             const j = await callHuggingFace(prompt, "Conseiller stratégique. Repond JSON: {s:[]}");
+             const j = await callHuggingFace(prompt, "Conseiller stratégique. Repond uniquement en JSON valide: {s:[]}");
              const p = JSON.parse(j);
              return p.s || p.suggestions || [];
         }

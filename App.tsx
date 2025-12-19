@@ -327,7 +327,16 @@ const App: React.FC = () => {
       if (data) {
           try {
               data.state.currentDate = new Date(data.state.currentDate);
-              setGameState(data.state);
+              
+              // MIGRATION: Fusion avec l'état par défaut pour garantir que les nouveaux champs (neutralTerritories) existent
+              const migratedState = {
+                  ...gameState, // Valeurs par défaut
+                  ...data.state, // Valeurs sauvegardées (écrasent les défauts)
+                  neutralTerritories: data.state.neutralTerritories || [], // Force le tableau vide si manquant
+                  infrastructure: data.state.infrastructure || {}
+              };
+
+              setGameState(migratedState);
               setFullHistory(data.history);
               if (data.aiProvider) setAiProvider(data.aiProvider);
               setEventQueue([]);
@@ -737,7 +746,8 @@ const App: React.FC = () => {
     }));
 
     let newOwnedTerritories = [...gameState.ownedTerritories];
-    let newNeutralTerritories = [...gameState.neutralTerritories];
+    // FIX: Secure array access for old saves that might miss this field
+    let newNeutralTerritories = [...(gameState.neutralTerritories || [])];
     let newEntities = [...gameState.mapEntities];
     let newInfrastructure = JSON.parse(JSON.stringify(gameState.infrastructure || {})); // Deep copy
 
