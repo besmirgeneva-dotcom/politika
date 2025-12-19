@@ -238,17 +238,21 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Simulation Géopolitique.
 RÈGLES CRITIQUES:
-1. NARRATION DYNAMIQUE: Ne te contente pas de confirmer les ordres. Décris les RÉACTIONS du monde. 
-2. ÉVÉNEMENTS AUTONOMES: Si le joueur passe son tour ou fait une action mineure, TU DOIS générer des événements mondiaux intéressants.
-3. NUCLÉAIRE: Si 'Nuc:OUI' dans le prompt, l'IA doit générer de la tension diplomatique.
-4. STATISTIQUES (CRUCIAL): Tu DOIS impérativement faire évoluer les valeurs (gt, ec, mi, po, co) à chaque tour si une action le justifie.
-   - Ne renvoie JAMAIS tout à 0 si le joueur agit.
-   - Une guerre ou menace = Tension(gt) +5 à +15.
-   - Investissement éco = Economie(ec) +2 à +5.
-   - Propagande = Popularité(po) +3.
-   - Scandale = Corruption(co) +5.
-5. FORMAT: JSON minifié valide.
-6. CONSTRUCTION: 'build_base' = Base Militaire, 'build_air_base' = Base Aérienne, 'build_defense' = Système de Défense.
+1. NARRATION: Tu es le maître du jeu.
+2. ÉVÉNEMENTS (OBLIGATOIRE):
+   - Tu DOIS générer au moins 2 événements dans le tableau 'ev' à CHAQUE réponse.
+   - Si le joueur fait une action, le premier événement 'ev' doit décrire le résultat (succès/échec).
+   - Le second événement doit être une actualité mondiale (crise, économie, guerre ailleurs).
+   - NE RENVOIE JAMAIS 'ev' VIDE.
+3. STATISTIQUES: Fais évoluer les valeurs (gt, ec, mi, po, co) selon l'action.
+4. FORMAT JSON MINIFIÉ (Clés):
+   - ev: Liste d'événements [{t:type, h:titre, d:desc}]. Types: 'world', 'crisis', 'economy', 'war'.
+   - gt: Global Tension Change (+/- int)
+   - ec: Economy Change
+   - mi: Military Change
+   - po: Popularity Change
+   - co: Corruption Change
+   - mu: Map Updates (annexation, build_base...)
 `;
 
 export const simulateTurn = async (
@@ -289,15 +293,15 @@ export const simulateTurn = async (
     Nucléaire:${hasNuclear ? "OUI" : "NON"} | Géo:${isLandlocked ? "Enclavé" : "Accès Mer"}
     Alliances:${allContext} | Chaos:${chaosLevel}
     Territoires:${territoryStr}
-    TERRES_DESOLEES: ${neutralStr}
     
-    ACTION JOUEUR: "${playerAction || "Passif"}"
+    ACTION JOUEUR: "${playerAction || "Gouverner le pays"}"
     
-    HISTORIQUE: ${hist}
-    INFRA: ${entitiesSummary}
-    DIPLO: ${diplomaticContext}
+    HISTORIQUE RÉCENT: ${hist}
     
-    TÂCHE: Simuler le tour. IMPÉRATIF: Modifie les variables gt (tension), ec (économie), mi (militaire) en conséquence de l'action. FORMAT JSON MINIFIÉ.
+    TÂCHE: Simuler le tour en JSON.
+    IMPÉRATIF:
+    1. Calcule les changements de stats (gt, ec, mi...).
+    2. REMPLIS OBLIGATOIREMENT le tableau 'ev' avec 2 ou 3 événements narratifs (Réussite de l'action joueur + Actualité mondiale).
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
