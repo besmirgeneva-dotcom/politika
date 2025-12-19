@@ -36,7 +36,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const getParticipants = (msg: ChatMessage): string[] => {
     const raw = msg.sender === 'player' ? [...msg.targets] : [msg.senderName, ...msg.targets];
     const flat: string[] = [];
-    raw.forEach(s => s.split(',').forEach(sub => flat.push(normalizeCountryName(sub.trim()))));
+    raw.forEach(s => {
+        if (s && typeof s === 'string') {
+            s.split(',').forEach(sub => flat.push(normalizeCountryName(sub.trim())));
+        }
+    });
     const unique = Array.from(new Set(flat.filter(p => p !== playerCountry && p !== '')));
     return unique.sort();
   };

@@ -14,6 +14,58 @@ const estimateTokens = (input: string, output: string): number => {
     return Math.ceil((input.length + output.length) / 4);
 };
 
+// --- JSON EXTRACTION HELPER (ROBUST) ---
+// Extrait le JSON valide même s'il est entouré de texte, en comptant la profondeur des accolades/crochets.
+const extractJson = (text: string): string => {
+    // 1. Trouver le premier caractère ouvrant
+    const match = text.match(/(\{|\[)/);
+    if (!match) return "{}";
+    
+    const startIndex = match.index!;
+    const openChar = match[0];
+    const closeChar = openChar === '{' ? '}' : ']';
+    
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+
+    // 2. Parcourir pour trouver la fermeture correspondante exacte
+    for (let i = startIndex; i < text.length; i++) {
+        const char = text[i];
+        
+        // Gestion des échappements et chaines de caractères
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        if (char === '\\') {
+            escape = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        
+        // Comptage de profondeur (hors string)
+        if (!inString) {
+            if (char === openChar) {
+                depth++;
+            } else if (char === closeChar) {
+                depth--;
+                // Si on revient à 0, c'est la fin du JSON valide
+                if (depth === 0) {
+                    return text.substring(startIndex, i + 1);
+                }
+            }
+        }
+    }
+    
+    // Fallback: Si on n'a pas trouvé la fermeture (JSON tronqué?), on renvoie tout depuis le début
+    // en espérant que le parser s'en sorte ou échoue proprement.
+    return text.substring(startIndex);
+};
+
 // --- OPTIMIZATION: MINIFIED SCHEMA KEYS ---
 const MINIFIED_SCHEMA = {
     type: Type.OBJECT,
@@ -95,48 +147,49 @@ const MINIFIED_SCHEMA = {
 };
 
 // Map the minified JSON back to the full SimulationResponse for the app
+// AJOUT: Sécurisation avec || '' ou || 0 pour éviter les null/undefined qui cassent l'UI
 const mapMinifiedToFull = (min: any, tokens: number = 0): SimulationResponse => {
     return {
         timeIncrement: min.ti || 'day',
         tokenUsage: tokens,
-        events: min.ev?.map((e: any) => ({
+        events: Array.isArray(min.ev) ? min.ev.map((e: any) => ({
             type: e.t || 'world',
             headline: e.h || 'Événement inconnu',
             description: e.d || 'Aucun détail disponible.', 
-            relatedCountry: e.rc
-        })) || [],
+            relatedCountry: e.rc ? String(e.rc) : undefined
+        })) : [],
         globalTensionChange: min.gt || 0,
         economyHealthChange: min.ec || 0,
         militaryPowerChange: min.mi || 0,
         popularityChange: min.po || 0,
         corruptionChange: min.co || 0,
-        spaceProgramActive: min.sp,
-        nuclearAcquired: min.nu,
-        mapUpdates: min.mu?.map((u: any) => ({
+        spaceProgramActive: !!min.sp,
+        nuclearAcquired: !!min.nu,
+        mapUpdates: Array.isArray(min.mu) ? min.mu.map((u: any) => ({
             type: u.t,
-            targetCountry: u.tc,
-            newOwner: u.no,
-            lat: u.lat,
-            lng: u.lng,
-            label: u.lbl,
-            entityId: u.id
-        })),
-        infrastructureUpdates: min.iu?.map((i: any) => ({
-            country: i.c,
-            type: i.t,
-            change: i.v
-        })),
-        incomingMessages: min.im?.map((m: any) => ({
-            sender: m.s,
-            text: m.tx,
-            targets: m.tg
-        })),
+            targetCountry: u.tc ? String(u.tc) : "Inconnu",
+            newOwner: u.no ? String(u.no) : undefined,
+            lat: Number(u.lat) || 0,
+            lng: Number(u.lng) || 0,
+            label: u.lbl ? String(u.lbl) : undefined,
+            entityId: u.id ? String(u.id) : undefined
+        })) : undefined,
+        infrastructureUpdates: Array.isArray(min.iu) ? min.iu.map((i: any) => ({
+            country: String(i.c),
+            type: String(i.t),
+            change: Number(i.v)
+        })) : undefined,
+        incomingMessages: Array.isArray(min.im) ? min.im.map((m: any) => ({
+            sender: m.s ? String(m.s) : "Inconnu",
+            text: m.tx ? String(m.tx) : "...",
+            targets: Array.isArray(m.tg) ? m.tg.map(String) : []
+        })) : undefined,
         allianceUpdate: min.au ? {
             action: min.au.a,
-            name: min.au.n,
-            type: min.au.t,
-            members: min.au.m,
-            leader: min.au.l
+            name: min.au.n ? String(min.au.n) : undefined,
+            type: min.au.t ? String(min.au.t) : undefined,
+            members: Array.isArray(min.au.m) ? min.au.m.map(String) : [],
+            leader: min.au.l ? String(min.au.l) : undefined
         } : undefined
     };
 };
@@ -224,7 +277,6 @@ export const simulateTurn = async (
     territoryStr = `${core} (+${ownedTerritories.length - 3} others)`;
   }
 
-  // OPTIMISATION TOKENS: On tronque la liste des terres désolées si elle est trop longue
   const neutralStr = neutralTerritories.length > 0 
       ? (neutralTerritories.length > 20 
           ? `${neutralTerritories.slice(0, 20).join(',')} (+${neutralTerritories.length - 20} déserts)` 
@@ -250,9 +302,13 @@ export const simulateTurn = async (
 
   if (provider === 'groq' && GROQ_API_KEY) {
       try {
-          const jsonStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, null);
+          const rawStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, null);
+          const jsonStr = extractJson(rawStr);
           return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
-      } catch (e) { console.warn("Groq fail, fallback Gemini", e); }
+      } catch (e) { 
+          console.warn("Groq fail, fallback Gemini", e); 
+          // Continue to fallback
+      }
   } 
 
   try {
@@ -348,14 +404,23 @@ export const sendDiplomaticMessage = async (
 
     if (provider === 'groq' && GROQ_API_KEY) {
         try {
-            const jsonStr = await callGroq(prompt, "Chef d'état. JSON: [{'s':'Pays','t':'Message'}]", true);
+            const rawStr = await callGroq(prompt, "Chef d'état. JSON: [{'s':'Pays','t':'Message'}]", true);
+            const jsonStr = extractJson(rawStr);
             const raw = JSON.parse(jsonStr);
+            
+            // Normalisation des données pour éviter les crashs si l'IA renvoie null
             const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
             return { 
-                messages: arr.map((r: any) => ({ sender: r.s, text: r.t })), 
+                messages: arr.map((r: any) => ({ 
+                    sender: r.s ? String(r.s) : (targets[0] || 'Inconnu'), 
+                    text: r.t ? String(r.t) : "..." 
+                })), 
                 usage: estimateTokens(prompt, jsonStr) 
             };
-        } catch (e) { console.warn("Groq fail"); }
+        } catch (e) { 
+            console.warn("Groq fail chat", e); 
+            // Continue fallback
+        }
     }
     
     try {
@@ -365,7 +430,10 @@ export const sendDiplomaticMessage = async (
             temperature: 0.7 
         });
         const raw = JSON.parse(response.text);
-        const messages = raw.map((r: any) => ({ sender: r.s, text: r.t })) || [];
+        const messages = raw.map((r: any) => ({ 
+            sender: r.s ? String(r.s) : (targets[0] || 'Inconnu'), 
+            text: r.t ? String(r.t) : "..." 
+        })) || [];
         return { messages, usage: estimateTokens(prompt, response.text) };
     } catch (e) { 
         return { messages: [{ sender: targets[0], text: "..." }], usage: 0 }; 
@@ -394,12 +462,21 @@ export const getStrategicSuggestions = async (
     const prompt = `3 actions courtes pour ${playerCountry}. Contexte:${hist}. JSON:{"s":["..."]}`;
     try {
         if (provider === 'groq' && GROQ_API_KEY) {
-             const j = await callGroq(prompt, "Conseiller stratégique. JSON.", true);
-             const p = JSON.parse(j);
-             return { suggestions: p.s || p.suggestions || [], usage: estimateTokens(prompt, j) };
+             const rawStr = await callGroq(prompt, "Conseiller stratégique. JSON.", true);
+             const jsonStr = extractJson(rawStr);
+             const p = JSON.parse(jsonStr);
+             const list = p.s || p.suggestions || p;
+             return { 
+                 suggestions: Array.isArray(list) ? list.map(String) : [], 
+                 usage: estimateTokens(prompt, jsonStr) 
+             };
         }
         const response = await generateRobustContent(prompt, { responseMimeType: "application/json" });
         const p = JSON.parse(response.text);
-        return { suggestions: p.s || p.suggestions || p, usage: estimateTokens(prompt, response.text) };
+        const list = p.s || p.suggestions || p;
+        return { 
+            suggestions: Array.isArray(list) ? list.map(String) : [], 
+            usage: estimateTokens(prompt, response.text) 
+        };
     } catch (e) { return { suggestions: ["Développer Industrie", "Renforcer Armée"], usage: 0 }; }
 }
