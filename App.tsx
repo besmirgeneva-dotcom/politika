@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, GameEvent, ChatMessage, MapEntityType } from './types';
 import { simulateTurn, getStrategicSuggestions, sendDiplomaticMessage, AIProvider } from './services/geminiService';
@@ -144,6 +143,7 @@ const App: React.FC = () => {
     const entitiesSummary = gameState.mapEntities.length > 0 ? gameState.mapEntities.map(e => `${e.type} en ${e.country}`).join('; ') : "Aucune installation.";
     const recentChat = gameState.chatHistory.slice(-5).map(m => `${m.senderName}: ${m.text}`).join(' | ');
 
+    // --- APPEL IA ---
     const result = await simulateTurn(
         gameState.playerCountry, formattedDate, finalOrderString, gameState.events,
         gameState.ownedTerritories, entitiesSummary, isCountryLandlocked(gameState.playerCountry),
@@ -152,6 +152,55 @@ const App: React.FC = () => {
     );
 
     if (result.tokenUsage) setTokenCount(prev => prev + result.tokenUsage!);
+
+    // --- CALCUL DES MÉCANIQUES DE JEU (Règles Déterministes) ---
+    const playerLower = gameState.playerCountry.toLowerCase();
+    
+    // 1. Variations Passives
+    const isEvenTurn = (gameState.turn + 1) % 2 === 0;
+    
+    let deltaTension = 1; // Tension +1% automatique
+    let deltaCorruption = 1; // Corruption +1% automatique
+    let deltaEconomy = isEvenTurn ? -5 : 0; // Economie -5% tous les 2 tours
+    let deltaPopularity = isEvenTurn ? -5 : 0; // Popularité -5% tous les 2 tours
+    let deltaMilitary = 0;
+
+    // 2. Détection des Événements Critiques (Triggers)
+    const hasAnnexed = result.mapUpdates?.some(u => u.type === 'annexation' && normalizeCountryName(u.newOwner || '') === gameState.playerCountry);
+    
+    if (hasAnnexed) {
+        deltaTension += 50; // Annexion = Tension +50%
+    }
+
+    result.events.forEach(e => {
+        const txt = (e.headline + " " + e.description).toLowerCase();
+        const concernsPlayer = txt.includes(playerLower) || e.relatedCountry === gameState.playerCountry;
+        
+        // Guerre : Si le joueur est impliqué
+        if (e.type === 'war' && concernsPlayer) {
+            deltaEconomy -= 20;    // Guerre = Eco -20%
+            deltaPopularity -= 20; // Guerre = Pop -20%
+            deltaTension += 50;    // Guerre = Tension +50%
+        }
+        
+        // Dommages Militaires
+        if (concernsPlayer) {
+            if (txt.includes('nucléaire') || txt.includes('nuclear') || txt.includes('atomique')) {
+                deltaMilitary -= 70; // Frappe Nucléaire = -70% Armée
+            } else if (txt.includes('bombarde') || txt.includes('airstrike') || txt.includes('frappe')) {
+                deltaMilitary -= 15; // Bombardement = -15% Armée
+            } else if (txt.includes('pertes') || txt.includes('losses') || txt.includes('défaite')) {
+                deltaMilitary -= 5;  // Pertes standards = -5% Armée
+            }
+        }
+    });
+
+    // 3. Application des Changements (IA + Mécaniques)
+    const newGlobalTension = clamp(gameState.globalTension + (result.globalTensionChange || 0) + deltaTension);
+    const newEconomyHealth = clamp(gameState.economyHealth + (result.economyHealthChange || 0) + deltaEconomy);
+    const newMilitaryPower = clamp(gameState.militaryPower + (result.militaryPowerChange || 0) + deltaMilitary);
+    const newPopularity = clamp(gameState.popularity + (result.popularityChange || 0) + deltaPopularity);
+    const newCorruption = clamp(gameState.corruption + (result.corruptionChange || 0) + deltaCorruption);
 
     const nextDate = new Date(gameState.currentDate);
     if (result.timeIncrement === 'year') nextDate.setFullYear(nextDate.getFullYear() + 1);
@@ -205,11 +254,11 @@ const App: React.FC = () => {
         ...gameState, currentDate: nextDate, turn: gameState.turn + 1,
         ownedTerritories: newOwned, neutralTerritories: newNeutral,
         mapEntities: newEntities, hasNuclear: newHasNuclear, isProcessing: false,
-        globalTension: clamp(gameState.globalTension + (result.globalTensionChange || 0)),
-        economyHealth: clamp(gameState.economyHealth + (result.economyHealthChange || 0)),
-        militaryPower: clamp(gameState.militaryPower + (result.militaryPowerChange || 0)),
-        popularity: clamp(gameState.popularity + (result.popularityChange || 0)),
-        corruption: clamp(gameState.corruption + (result.corruptionChange || 0)),
+        globalTension: newGlobalTension,
+        economyHealth: newEconomyHealth,
+        militaryPower: newMilitaryPower,
+        popularity: newPopularity,
+        corruption: newCorruption,
         chatHistory: [...gameState.chatHistory, ...aiIncomingMessages]
     };
 

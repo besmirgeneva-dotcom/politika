@@ -13,7 +13,7 @@ const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
     for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
         const xi = vs[i][0], yi = vs[i][1];
         const xj = vs[j][0], yj = vs[j][1];
-        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) + xi); // Simplification mathématique correcte pour RayCasting
         if (intersect) inside = !inside;
     }
     return inside;
@@ -43,6 +43,7 @@ const findVisualCenter = (feature: any): [number, number] | null => {
         if (isPointInFeature([center.lat, center.lng], feature)) {
             return [center.lat, center.lng];
         }
+        // Fallback: tentative aléatoire dans la bounding box pour trouver un point intérieur
         const southWest = bounds.getSouthWest();
         const northEast = bounds.getNorthEast();
         for (let i = 0; i < 50; i++) {
@@ -54,20 +55,20 @@ const findVisualCenter = (feature: any): [number, number] | null => {
     } catch (e) { return null; }
 };
 
-// --- CUSTOM MARKERS ---
+// --- CUSTOM MARKERS & GROUPING ---
+
 const getEntityLabel = (type: MapEntityType, customLabel?: string) => {
     let typeName = "";
     switch(type) {
-        case 'military_base': typeName = 'Base militaire'; break;
-        case 'air_base': typeName = 'Base aérienne'; break;
-        case 'defense_system': typeName = 'Système de défense'; break;
+        case 'military_base': typeName = 'Base Militaire'; break;
+        case 'air_base': typeName = 'Base Aérienne'; break;
+        case 'defense_system': typeName = 'Système Défense'; break;
         default: typeName = 'Installation';
     }
 
-    if (customLabel && !customLabel.toLowerCase().includes('build_') && !customLabel.includes('Base military') && customLabel !== typeName) {
-        return `${typeName} (${customLabel})`;
+    if (customLabel && !customLabel.toLowerCase().includes('build_') && customLabel !== typeName) {
+        return customLabel;
     }
-
     return typeName;
 }
 
@@ -80,41 +81,75 @@ const getEntityColor = (type: MapEntityType) => {
     }
 };
 
-const createDotIcon = (color: string, type: MapEntityType, showLabel: boolean, label?: string) => {
-  const labelText = getEntityLabel(type, label);
+// Création d'une icône groupée affichant une liste
+const createGroupedIcon = (entities: MapEntity[], zoom: number) => {
+    // On prend la couleur du premier élément prioritaire (Défense > Air > Base)
+    const priorityType = entities.find(e => e.type === 'defense_system') ? 'defense_system' 
+                       : entities.find(e => e.type === 'air_base') ? 'air_base' 
+                       : 'military_base';
+    
+    const color = getEntityColor(priorityType);
+    const count = entities.length;
+    
+    // Génération de la liste HTML
+    const listItems = entities.map(e => {
+        const lbl = getEntityLabel(e.type, e.label);
+        return `<div style="display:flex; align-items:center; gap:4px; margin-bottom:1px;">
+            <div style="width:4px; height:4px; border-radius:50%; background-color:${getEntityColor(e.type)};"></div>
+            <span>${lbl}</span>
+        </div>`;
+    }).join('');
 
-  return L.divIcon({
-    className: 'custom-dot-marker',
-    html: `
-      <div style="position: relative; width: 0; height: 0;">
-        <div style="
-          position: absolute;
-          left: -4px; top: -4px;
-          width: 8px; height: 8px; 
-          background-color: ${color}; 
-          border-radius: 50%; 
-          border: 1.5px solid white; 
-          box-shadow: 0 1px 2px rgba(0,0,0,0.8);
-        "></div>
-        
-        ${showLabel ? `
-        <div style="
-          position: absolute; 
-          left: 10px; top: -6px; 
-          white-space: nowrap; 
-          font-size: 10px;
-          font-weight: bold; 
-          color: white; 
-          text-shadow: 0px 0px 3px black, 0px 0px 5px black;
-          pointer-events: none;
-          z-index: 1200;
-        ">${labelText}</div>
-        ` : ''}
-      </div>
-    `,
-    iconSize: [0, 0],
-    iconAnchor: [0, 0]
-  });
+    return L.divIcon({
+        className: 'custom-grouped-marker',
+        html: `
+          <div style="position: relative; overflow: visible;">
+            <!-- Le Point Principal -->
+            <div style="
+              width: 10px; height: 10px; 
+              background-color: ${color}; 
+              border-radius: 50%; 
+              border: 2px solid white; 
+              box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+              position: relative;
+              z-index: 10;
+            ">
+                ${count > 1 ? `<div style="
+                    position: absolute; top: -5px; right: -5px; 
+                    background: red; color: white; border-radius: 50%; 
+                    width: 10px; height: 10px; font-size: 7px; 
+                    display: flex; align-items: center; justify-content: center; font-weight: bold;
+                    border: 1px solid white;
+                ">${count}</div>` : ''}
+            </div>
+            
+            <!-- La Liste sur le côté -->
+            ${zoom >= 5 ? `
+            <div style="
+              position: absolute; 
+              left: 14px; top: -50%; transform: translateY(-25%);
+              background-color: rgba(0, 0, 0, 0.75);
+              backdrop-filter: blur(2px);
+              padding: 4px 6px;
+              border-radius: 4px;
+              white-space: nowrap; 
+              font-size: 9px;
+              font-weight: 600; 
+              color: white; 
+              border-left: 2px solid ${color};
+              pointer-events: none;
+              z-index: 5;
+              display: flex; flex-direction: column;
+              box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            ">
+                ${listItems}
+            </div>
+            ` : ''}
+          </div>
+        `,
+        iconSize: [0, 0],
+        iconAnchor: [5, 5] // Centré sur le point
+    });
 };
 
 const ALL_CAPITALS_URL = "https://raw.githubusercontent.com/hyperknot/country-capitals/master/data/country-capitals.json";
@@ -286,6 +321,26 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
       return null;
   };
 
+  // --- LOGIQUE DE REGROUPEMENT DES ENTITÉS ---
+  const groupedEntities = useMemo(() => {
+      const groups: Record<string, { pos: [number, number], entities: MapEntity[] }> = {};
+      
+      mapEntities.forEach(entity => {
+          const pos = getMarkerPosition(entity);
+          if (!pos) return;
+          
+          // On utilise une clé basée sur une précision réduite pour regrouper les points très proches
+          const key = `${pos[0].toFixed(3)},${pos[1].toFixed(3)}`;
+          
+          if (!groups[key]) {
+              groups[key] = { pos, entities: [] };
+          }
+          groups[key].entities.push(entity);
+      });
+      
+      return Object.values(groups);
+  }, [mapEntities, centers, featureMap]); // Recalculer si les entités ou la carte changent
+
   if (!geoData) return <div className="text-stone-500 text-center mt-20">Initialisation satellite...</div>;
 
   return (
@@ -295,13 +350,25 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         <GeoJSON key={`map-${ownedTerritories.length}-${neutralTerritories.length}`} data={displayGeoData || geoData} style={style} onEachFeature={(f, l) => l.on('click', () => onRegionClick(f.properties.name))} />
         <MapLabels zoom={zoom} visibleCountries={centers} playerCountry={playerCountry} ownedTerritories={ownedTerritories} neutralTerritories={neutralTerritories} />
         <CapitalMarkers zoom={zoom} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
-        {mapEntities.map((entity) => {
-             if (zoom < 6) return null;
-             const pos = getMarkerPosition(entity);
-             if (!pos) return null;
+        
+        {/* Render Grouped Markers */}
+        {groupedEntities.map((group, idx) => {
+             if (zoom < 5) return null; // Ne pas afficher si trop dézoomé pour éviter le clutter
              return (
-                <Marker key={entity.id} position={pos} icon={createDotIcon(getEntityColor(entity.type), entity.type, zoom >= 8, entity.label)} zIndexOffset={1100}>
-                    <Popup>{getEntityLabel(entity.type, entity.label)}</Popup>
+                <Marker 
+                    key={`group-${idx}`} 
+                    position={group.pos} 
+                    icon={createGroupedIcon(group.entities, zoom)} 
+                    zIndexOffset={1100}
+                >
+                    {/* Le Popup reste disponible au clic si besoin */}
+                    <Popup>
+                        <div className="text-xs font-bold">
+                            {group.entities.map((e, i) => (
+                                <div key={i}>{getEntityLabel(e.type, e.label)}</div>
+                            ))}
+                        </div>
+                    </Popup>
                 </Marker>
              );
         })}

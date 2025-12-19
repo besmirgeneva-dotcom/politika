@@ -188,8 +188,14 @@ RÈGLES CRITIQUES:
 1. NARRATION DYNAMIQUE: Ne te contente pas de confirmer les ordres. Décris les RÉACTIONS du monde. 
 2. ÉVÉNEMENTS AUTONOMES: Si le joueur passe son tour ou fait une action mineure, TU DOIS générer des événements mondiaux intéressants.
 3. NUCLÉAIRE: Si 'Nuc:OUI' dans le prompt, l'IA doit générer de la tension diplomatique.
-4. FORMAT: JSON minifié valide.
-5. CONSTRUCTION: 'build_base' = Base Militaire, 'build_air_base' = Base Aérienne, 'build_defense' = Système de Défense.
+4. STATISTIQUES (CRUCIAL): Tu DOIS impérativement faire évoluer les valeurs (gt, ec, mi, po, co) à chaque tour si une action le justifie.
+   - Ne renvoie JAMAIS tout à 0 si le joueur agit.
+   - Une guerre ou menace = Tension(gt) +5 à +15.
+   - Investissement éco = Economie(ec) +2 à +5.
+   - Propagande = Popularité(po) +3.
+   - Scandale = Corruption(co) +5.
+5. FORMAT: JSON minifié valide.
+6. CONSTRUCTION: 'build_base' = Base Militaire, 'build_air_base' = Base Aérienne, 'build_defense' = Système de Défense.
 `;
 
 export const simulateTurn = async (
@@ -234,7 +240,7 @@ export const simulateTurn = async (
     INFRA: ${entitiesSummary}
     DIPLO: ${diplomaticContext}
     
-    TÂCHE: Simuler le tour. FORMAT JSON MINIFIÉ.
+    TÂCHE: Simuler le tour. IMPÉRATIF: Modifie les variables gt (tension), ec (économie), mi (militaire) en conséquence de l'action. FORMAT JSON MINIFIÉ.
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
