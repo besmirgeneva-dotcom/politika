@@ -179,7 +179,7 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Règles:
 1. STATS (gt,ec,mi,po,co): DOIVENT CHANGER à chaque tour. Ne laisse jamais tout à 0. Ajoute de la volatilité (-3 à +3) même sans événement majeur.
-2. CARTE(mu): 'annexation', 'build_base', 'dissolve'. IMPORTANT: Si 'annexation', fournis TOUJOURS 'no' (newOwner).
+2. CARTE(mu): 'annexation', 'build_base', 'dissolve'.
 3. INFRA(iu): Civil seulement.
 4. ACTION: Arcade. Si action agressive, tension (gt) doit monter.
 5. FORMAT: JSON minifié uniquement.
