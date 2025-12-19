@@ -1,7 +1,7 @@
-
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, GeoJSON, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import * as turf from '@turf/turf';
 import { MapEntity, MapEntityType } from '../types';
 import { getFrenchName } from '../constants';
 
@@ -198,12 +198,8 @@ const LABEL_OVERRIDES: Record<string, [number, number]> = {
 };
 
 // --- MAP LABELS COMPONENT ---
-const MapLabels = ({ zoom, visibleCountries, playerCountry, neutralTerritories }: { zoom: number, visibleCountries: any[], playerCountry: string | null, neutralTerritories: string[] }) => {
-    // Affichage progressif selon le zoom pour éviter la surcharge
-    // Zoom 2-3 : Uniquement les grands pays
-    // Zoom 4+ : Tout le monde
-    
-    // Définition de "Grand Pays" (très approximatif via liste, ou simplement tout afficher si zoom assez grand)
+const MapLabels = ({ zoom, visibleCountries, playerCountry, ownedTerritories, neutralTerritories }: { zoom: number, visibleCountries: any[], playerCountry: string | null, ownedTerritories: string[], neutralTerritories: string[] }) => {
+    // Définition de "Grand Pays"
     const MAJOR_POWERS = ["États-Unis", "Russie", "Chine", "Brésil", "Australie", "Canada", "Inde", "Algérie", "Congo", "Argentine"];
 
     return (
@@ -214,17 +210,22 @@ const MapLabels = ({ zoom, visibleCountries, playerCountry, neutralTerritories }
                 if (!center) return null;
 
                 const isPlayer = name === playerCountry;
-                const isMajor = MAJOR_POWERS.includes(name);
-                
-                // Remplacer le nom par "PAYS VIDE" si dans neutralTerritories
+                const isOwned = ownedTerritories.includes(name);
                 const isNeutral = neutralTerritories.includes(name);
-                const displayName = isNeutral ? "PAYS VIDE" : name;
-                const displayColor = isNeutral ? '#b91c1c' : (isPlayer ? '#15803d' : '#374151'); // Rouge foncé pour vide
+                
+                // MASQUAGE DU NOM SI ANNEXÉ MAIS PAS LE COEUR DU PAYS JOUEUR
+                // Si je suis la France, et que je possède l'Espagne :
+                // isPlayer = false (car Espagne != France)
+                // isOwned = true
+                // Donc on retourne null pour ne pas afficher "Espagne"
+                if (isOwned && !isPlayer) return null;
 
-                // LOGIQUE D'AFFICHAGE
-                // Zoom < 3 : Seulement les très grands
-                // Zoom >= 3 : La plupart
-                // Zoom >= 5 : Tous (y compris les petits états)
+                const displayName = isNeutral ? "PAYS VIDE" : name;
+                const displayColor = isNeutral ? '#b91c1c' : (isPlayer ? '#15803d' : '#374151');
+                
+                const isMajor = MAJOR_POWERS.includes(name);
+
+                // LOGIQUE D'AFFICHAGE (Zoom)
                 if (zoom < 3 && !isMajor) return null; 
 
                 const fontSize = zoom < 4 ? '9px' : '11px';
@@ -357,6 +358,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
   const [centers, setCenters] = useState<{name: string, center: [number, number]}[]>([]);
   const featureMap = useRef<Record<string, any>>({});
 
+  // 1. Load Data
   const processGeoData = (data: any) => {
       const newCenters: {name: string, center: [number, number]}[] = [];
       
@@ -366,12 +368,9 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
           featureMap.current[name] = feature;
           
           let center: [number, number] | null = null;
-
-          // 1. Priorité ABSOLUE aux coordonnées manuelles (Liste de 180+ pays)
           if (LABEL_OVERRIDES[name]) {
               center = LABEL_OVERRIDES[name];
           } else {
-              // 2. Si pas de manuel (ex: petite île oubliée), calcul d'un point INTÉRIEUR garanti
               center = findVisualCenter(feature);
           }
 
@@ -407,16 +406,65 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     loadData();
   }, []);
 
+  // 2. Compute Merged Geometry (Union of Owned Territories)
+  const displayGeoData = useMemo(() => {
+      if (!geoData) return null;
+      
+      // If we don't own more than 1 territory, or no player country, just return original data
+      // We also check if we have enough territories to possibly share a border
+      if (!playerCountry || ownedTerritories.length <= 1) return geoData;
+
+      const ownedFeatures: any[] = [];
+      const otherFeatures: any[] = [];
+
+      for (const feature of geoData.features) {
+          if (ownedTerritories.includes(feature.properties.name)) {
+              ownedFeatures.push(feature);
+          } else {
+              otherFeatures.push(feature);
+          }
+      }
+
+      if (ownedFeatures.length === 0) return geoData;
+
+      try {
+          // Attempt to merge all owned features into one
+          let merged = ownedFeatures[0];
+          // We iterate and union them progressively
+          for (let i = 1; i < ownedFeatures.length; i++) {
+              const u = turf.union(merged, ownedFeatures[i]);
+              if (u) merged = u;
+          }
+          
+          // Force the name of the merged feature to be the Player Country
+          // This ensures styles apply correctly as "Player" color
+          if (merged && merged.properties) {
+              merged.properties = { ...merged.properties, name: playerCountry };
+          } else if (merged) {
+              merged.properties = { name: playerCountry };
+          }
+
+          return {
+              type: "FeatureCollection",
+              features: [...otherFeatures, merged]
+          };
+      } catch (e) {
+          console.warn("Turf union failed, fallback to standard map", e);
+          return geoData;
+      }
+
+  }, [geoData, ownedTerritories, playerCountry]);
+
   const style = (feature: any) => {
     const countryName = feature.properties.name;
     let fillColor = "#d1d5db"; // Gris neutre
     
     if (playerCountry === countryName) {
-        fillColor = "#22c55e"; // Vert joueur
+        fillColor = "#22c55e"; // Vert joueur (inclut désormais les annexés fusionnés)
     } else if (ownedTerritories.includes(countryName)) {
-        fillColor = "#4ade80"; // Vert annexe
+        fillColor = "#4ade80"; // Vert annexe (cas fallback si fusion échoue)
     } else if (neutralTerritories.includes(countryName)) {
-        fillColor = "#7f1d1d"; // Rouge foncé (Terre brulée/Détruite)
+        fillColor = "#7f1d1d"; // Rouge foncé
     }
 
     return {
@@ -444,22 +492,15 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     });
   };
 
-  // --- LOGIC: MARKER POSITIONING (STRICTLY INSIDE BORDERS) ---
   const [cachedPositions, setCachedPositions] = useState<Record<string, [number, number]>>({});
 
   const getMarkerPosition = (entity: MapEntity): [number, number] | null => {
-      // 1. Coordonnées explicites
-      if (entity.lat !== 0 || entity.lng !== 0) {
-          return [entity.lat, entity.lng];
-      }
-
-      // 2. Cache
+      if (entity.lat !== 0 || entity.lng !== 0) return [entity.lat, entity.lng];
       if (cachedPositions[entity.id]) return cachedPositions[entity.id];
 
       const countryName = entity.country;
       const feature = featureMap.current[countryName];
       
-      // 3. Calcul d'une position aléatoire valide (Rejection Sampling amélioré)
       if (feature) {
           try {
               const layer = L.geoJSON(feature);
@@ -473,27 +514,17 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
                   return seed / 233280;
               };
 
-              // On essaie 50 fois de placer le point DANS le polygone
               for (let i = 0; i < 50; i++) {
                   const lat = southWest.lat + pseudoRandom() * (northEast.lat - southWest.lat);
                   const lng = southWest.lng + pseudoRandom() * (northEast.lng - southWest.lng);
-                  
-                  if (isPointInFeature([lat, lng], feature)) {
-                      return [lat, lng];
-                  }
+                  if (isPointInFeature([lat, lng], feature)) return [lat, lng];
               }
-              
-              // 4. Si échec, on utilise le centre visuel calculé au chargement (Garantie de secours)
               const backupCenter = centers.find(c => c.name === countryName);
               if (backupCenter) return backupCenter.center;
-
           } catch (e) {}
       }
-
-      // 5. Dernier recours (ne devrait jamais arriver si la liste centers est correcte)
       const manualCenter = centers.find(c => c.name === countryName);
       if (manualCenter) return manualCenter.center;
-
       return null;
   };
 
@@ -512,31 +543,29 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         <MapController onZoomChange={setZoom} />
         <FlyToCountry targetCountry={focusCountry} centers={centers} />
         
-        {/* Base Layer */}
-        <GeoJSON data={geoData} style={style} onEachFeature={onEachFeature} />
+        {/* IMPORTANT: Key is essential to force re-render when territories merge */}
+        <GeoJSON 
+            key={`map-${ownedTerritories.length}-${neutralTerritories.length}`} 
+            data={displayGeoData || geoData} 
+            style={style} 
+            onEachFeature={onEachFeature} 
+        />
 
-        {/* Labels des Pays (Mise à jour avec neutralTerritories) */}
         <MapLabels 
             zoom={zoom} 
             visibleCountries={centers} 
             playerCountry={playerCountry}
+            ownedTerritories={ownedTerritories}
             neutralTerritories={neutralTerritories}
         />
         
-        {/* Capitales */}
         <CapitalMarkers zoom={zoom} />
 
-        {/* Entités de carte (Bases/Défenses) */}
         {mapEntities.map((entity) => {
-             // RÈGLE : Affichage des points (dot) à partir du Zoom 6
              if (zoom < 6) return null;
-
              const position = getMarkerPosition(entity);
              if (!position) return null;
-             
-             // RÈGLE : Affichage du texte à partir du Zoom 8
              const showLabel = zoom >= 8;
-
              return (
                 <Marker
                     key={entity.id}

@@ -79,6 +79,22 @@ const getShortEntityName = (t: MapEntityType) => {
 // Helper to keep values between 0 and 100
 const clamp = (value: number): number => Math.max(0, Math.min(100, value));
 
+// --- COMPONENT HELPERS ---
+const StatGauge = ({ label, value, color, icon }: { label: string, value: number, color: string, icon: string }) => (
+    <div className="flex flex-col gap-1 w-full">
+        <div className="flex justify-between items-end text-xs">
+            <span className="font-bold text-stone-400 flex items-center gap-1">{icon} {label}</span>
+            <span className="font-mono font-bold text-white">{value}%</span>
+        </div>
+        <div className="w-full h-2 bg-stone-800 rounded-full overflow-hidden border border-stone-700">
+            <div 
+                className={`h-full ${color} transition-all duration-500`} 
+                style={{ width: `${value}%` }}
+            ></div>
+        </div>
+    </div>
+);
+
 // --- LOGO COMPONENT ---
 const GameLogo = ({ size = 'large', theme = 'dark' }: { size?: 'small' | 'large', theme?: 'dark' | 'light' }) => {
     const isLight = theme === 'light';
@@ -1613,49 +1629,35 @@ const App: React.FC = () => {
                                 🛡
                             </button>
                         )}
-                        <button 
-                            onClick={() => setAppMode('portal_dashboard')}
-                            className="bg-red-900/80 text-white p-3 rounded-xl shadow-lg border border-red-800 hover:bg-red-800 hover:scale-105 transition-all"
-                            title="Quitter vers menu"
-                        >
-                            ✕
-                        </button>
                     </div>
                 </div>
 
-                {/* 7. TOP STATS BAR */}
-                <div className="absolute top-6 left-6 right-6 z-30 flex justify-between items-start pointer-events-none">
-                     {/* STATS CAPSULE */}
-                     <div className="bg-stone-900/90 backdrop-blur-md text-white p-1 rounded-full border border-stone-700 shadow-2xl flex items-center gap-4 px-4 pointer-events-auto">
-                        <div className="flex items-center gap-2 border-r border-stone-700 pr-4">
-                            <img src={getFlagUrl(gameState.playerCountry) || ''} alt="" className="w-8 h-5 rounded object-cover" />
-                            <div className="flex flex-col">
-                                <span className="text-[10px] font-bold text-stone-400 leading-none uppercase">Nation</span>
-                                <span className="text-sm font-bold leading-none">{gameState.playerCountry}</span>
-                            </div>
+                {/* 7. TOP LEFT STATS (Restored Gauges) */}
+                <div className="absolute top-6 left-6 z-30 flex flex-col gap-2 pointer-events-none">
+                    <div className="bg-stone-900/90 backdrop-blur-md p-3 rounded-xl border border-stone-700 shadow-2xl pointer-events-auto min-w-[200px] flex flex-col gap-3">
+                        <StatGauge label="Tension" value={gameState.globalTension} color="bg-red-500" icon="🔥" />
+                        <StatGauge label="Économie" value={gameState.economyHealth} color="bg-emerald-500" icon="💰" />
+                        <StatGauge label="Armée" value={gameState.militaryPower} color="bg-blue-500" icon="⚔️" />
+                        <StatGauge label="Popularité" value={gameState.popularity} color="bg-purple-500" icon="❤️" />
+                    </div>
+                </div>
+
+                {/* 8. TOP RIGHT COUNTRY + MENU */}
+                <div className="absolute top-6 right-6 z-30 flex flex-col items-end gap-2 pointer-events-none">
+                    <div className="bg-stone-900/90 backdrop-blur-md p-2 pl-4 pr-2 rounded-full border border-stone-700 shadow-2xl pointer-events-auto flex items-center gap-3">
+                        <div className="flex flex-col items-end">
+                            <span className="text-[10px] text-stone-400 uppercase font-bold tracking-widest">Président</span>
+                            <span className="text-sm font-bold text-white leading-none uppercase">{gameState.playerCountry}</span>
                         </div>
-                        
-                        <div className="flex gap-4 text-xs font-mono">
-                            <div className="flex flex-col items-center">
-                                <span className="text-[9px] text-stone-500 uppercase">Tension</span>
-                                <span className={`font-bold ${gameState.globalTension > 75 ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
-                                    {gameState.globalTension}%
-                                </span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                                <span className="text-[9px] text-stone-500 uppercase">Éco</span>
-                                <span className="font-bold text-blue-400">{gameState.economyHealth}%</span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                                <span className="text-[9px] text-stone-500 uppercase">Armée</span>
-                                <span className="font-bold text-orange-400">{gameState.militaryPower}%</span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                                <span className="text-[9px] text-stone-500 uppercase">Pop</span>
-                                <span className="font-bold text-purple-400">{gameState.popularity}%</span>
-                            </div>
-                        </div>
-                     </div>
+                        <img src={getFlagUrl(gameState.playerCountry)} className="w-10 h-10 rounded-full border-2 border-stone-600 object-cover" />
+                        <button 
+                            onClick={() => setAppMode('portal_dashboard')}
+                            className="w-10 h-10 rounded-full bg-stone-800 hover:bg-red-600 text-white flex items-center justify-center transition-colors border border-stone-600 ml-2"
+                            title="Menu Principal"
+                        >
+                            ☰
+                        </button>
+                    </div>
                 </div>
             </>
         )}
