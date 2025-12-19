@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import WorldMap from './components/WorldMap';
 import EventLog from './components/EventLog';
@@ -76,6 +75,9 @@ const getShortEntityName = (t: MapEntityType) => {
         default: return 'Autre';
     }
 }
+
+// Helper to keep values between 0 and 100
+const clamp = (value: number): number => Math.max(0, Math.min(100, value));
 
 // --- LOGO COMPONENT ---
 const GameLogo = ({ size = 'large', theme = 'dark' }: { size?: 'small' | 'large', theme?: 'dark' | 'light' }) => {
@@ -685,7 +687,7 @@ const App: React.FC = () => {
 
     const shouldSendFullContext = gameState.turn === 1 || gameState.turn % 10 === 0;
     
-    let entitiesSummary = "UNCHANGED_FROM_PREVIOUS_REPORTS"; // Placeholder pour économiser les tokens
+    let entitiesSummary = "UNCHANGED_FROM_PREVIOUS_REPORTS"; 
 
     if (shouldSendFullContext) {
         const summaryMap: Record<string, Record<string, number>> = {};
@@ -751,24 +753,11 @@ const App: React.FC = () => {
     let newNeutralTerritories = [...(gameState.neutralTerritories || [])];
     let newEntities = [...gameState.mapEntities];
     let newInfrastructure = JSON.parse(JSON.stringify(gameState.infrastructure || {})); // Deep copy
-
     let newHasNuclear = gameState.hasNuclear;
     
-    // --- MANUAL OVERRIDE FOR NUCLEAR ACQUISITION ---
-    // Sometimes AI forgets to set the flag in JSON but describes it in text.
-    // We check if the player asked for it AND the AI response seems positive or successful.
-    if (!newHasNuclear && finalOrderString.toLowerCase().includes("nucléaire")) {
-        const successKeywords = ["réussite", "succès", "opérationnel", "acquis", "développé", "doté"];
-        const aiResponseText = newAiEvents.map(e => e.description.toLowerCase() + " " + e.headline.toLowerCase()).join(" ");
-        if (successKeywords.some(kw => aiResponseText.includes(kw))) {
-            newHasNuclear = true;
-            result.nuclearAcquired = true; // Force event trigger below
-        }
-    }
+    // --- MAP UPDATES & EVENT DETECTION ---
+    let annexationHappened = false;
 
-    let cameraTarget = gameState.playerCountry;
-
-    // --- MISE À JOUR CARTE (VISUEL) ---
     if (result.mapUpdates) {
         for (const update of result.mapUpdates) {
             if (update.type === 'dissolve') {
@@ -779,37 +768,32 @@ const App: React.FC = () => {
                 }
                 showNotification(`Territoire détruit : ${target}`);
             } else if (update.type === 'annexation') {
-                // ANNEXATION PAYS ENTIER
                 const target = normalizeCountryName(update.targetCountry); 
                 const newOwner = update.newOwner ? normalizeCountryName(update.newOwner) : gameState.playerCountry;
                 
                 newNeutralTerritories = newNeutralTerritories.filter(t => t !== target);
                 
-                // Retirer de l'ancien propriétaire s'il le possédait
                 if (newOwnedTerritories.includes(target)) {
                     if (newOwner !== gameState.playerCountry) {
                         newOwnedTerritories = newOwnedTerritories.filter(t => t !== target);
                     }
                 }
                 
-                // Ajouter au nouveau propriétaire
                 if (newOwner === gameState.playerCountry && !newOwnedTerritories.includes(target)) {
                     newOwnedTerritories.push(target);
-                    // Si on annexe une puissance nucléaire, on récupère la bombe
                     if (hasNuclearArsenal(target)) newHasNuclear = true;
+                    annexationHappened = true; // DETECT ANNEXATION FOR STATS
                 }
             } else if (update.type === 'annex_province') {
-                // ANNEXATION PROVINCE (NOUVEAU)
-                const targetFull = update.targetCountry; // Format "Pays:Province"
-                // On ajoute simplement cet ID à la liste des territoires possédés
+                const targetFull = update.targetCountry; 
                 if (!newOwnedTerritories.includes(targetFull)) {
                      newOwnedTerritories.push(targetFull);
                      showNotification(`Région annexée: ${targetFull}`);
+                     annexationHappened = true; // DETECT ANNEXATION FOR STATS
                 }
             } else if (update.type === 'remove_entity') {
                 newEntities = newEntities.filter(e => e.id !== update.entityId && e.label !== update.label);
             } else if (update.type === 'build_base' || update.type === 'build_defense') {
-                // CORRECTION LABELS IA
                 let finalLabel = update.label;
                 if (!finalLabel || finalLabel.toLowerCase().includes('build_')) {
                     finalLabel = update.type === 'build_base' ? 'Base Militaire' : 'Système de Défense';
@@ -827,7 +811,7 @@ const App: React.FC = () => {
         }
     }
 
-    // --- MISE À JOUR INFRASTRUCTURE (MÉMOIRE) ---
+    // --- INFRASTRUCTURE ---
     if (result.infrastructureUpdates) {
         for (const update of result.infrastructureUpdates) {
             const country = normalizeCountryName(update.country);
@@ -862,10 +846,11 @@ const App: React.FC = () => {
         }
     }
 
+    let cameraTarget = gameState.playerCountry;
     if (newAiEvents.length > 0 && newAiEvents[0].relatedCountry) {
         cameraTarget = normalizeCountryName(newAiEvents[0].relatedCountry);
     } else if (result.mapUpdates && result.mapUpdates.length > 0) {
-        cameraTarget = normalizeCountryName(result.mapUpdates[0].targetCountry.split(':')[0]); // Handle "Country:Province"
+        cameraTarget = normalizeCountryName(result.mapUpdates[0].targetCountry.split(':')[0]); 
     }
 
     const newHistory = [...fullHistory, playerEvent, ...newAiEvents];
@@ -899,29 +884,91 @@ const App: React.FC = () => {
 
     setFullHistory(newHistory);
 
-    const applyNaturalDrift = (aiValue: number, currentValue: number) => {
-        if (aiValue !== 0) return Math.max(0, Math.min(100, currentValue + aiValue));
-        if (Math.random() > 0.7) {
-            const drift = Math.random() > 0.5 ? 1 : -1;
-            return Math.max(0, Math.min(100, currentValue + drift));
-        }
-        return currentValue;
-    };
+    // --- LOGIQUE STATS (AUTO DRIFT & EVENT PENALTIES) ---
+    // 1. Initialiser avec les valeurs courantes
+    let calcTension = gameState.globalTension;
+    let calcEconomy = gameState.economyHealth;
+    let calcPopularity = gameState.popularity;
+    let calcCorruption = gameState.corruption;
+    let calcMilitary = gameState.militaryPower;
 
-    const newGlobalTension = applyNaturalDrift(result.globalTensionChange, gameState.globalTension);
-    const newEconomyHealth = applyNaturalDrift(result.economyHealthChange, gameState.economyHealth);
-    const newPopularity = applyNaturalDrift(result.popularityChange || 0, gameState.popularity);
-    const corruptionDrift = result.corruptionChange === 0 && Math.random() > 0.8 ? 1 : result.corruptionChange || 0;
-    const newCorruption = Math.max(0, Math.min(100, gameState.corruption + corruptionDrift));
-    const newMilitaryPower = Math.max(0, Math.min(100, gameState.militaryPower + result.militaryPowerChange));
+    // 2. Appliquer les changements IA (si explicites, souvent 0 maintenant grâce au prompt)
+    calcTension += (result.globalTensionChange || 0);
+    calcEconomy += (result.economyHealthChange || 0);
+    calcPopularity += (result.popularityChange || 0);
+    calcCorruption += (result.corruptionChange || 0);
+    calcMilitary += (result.militaryPowerChange || 0);
+
+    // 3. AUTO DRIFT (Règles automatiques)
+    // Tension +1% par tour
+    calcTension += 1;
+    // Corruption +1% par tour
+    calcCorruption += 1;
+    // Economie -5% tous les 2 tours
+    if (gameState.turn % 2 === 0) calcEconomy -= 5;
+    // Popularité -5% tous les 2 tours
+    if (gameState.turn % 2 === 0) calcPopularity -= 5;
+
+    // 4. EVENT PENALTIES (Punitions contextuelles)
+    const hasWarEvent = newAiEvents.some(e => e.type === 'war');
+    const hasAttackKeywords = newAiEvents.some(e => 
+        e.description.toLowerCase().includes('attaque') || 
+        e.description.toLowerCase().includes('invasion') || 
+        e.description.toLowerCase().includes('déclaré la guerre')
+    );
     
+    // Tension: +50% si annexion ou attaque
+    if (annexationHappened || (hasWarEvent && hasAttackKeywords)) {
+        calcTension += 50;
+    }
+
+    // Economie & Popularité: -20% si début de guerre
+    if (hasWarEvent) {
+        calcEconomy -= 20;
+        calcPopularity -= 20;
+    }
+
+    // Militaire
+    const combinedDesc = newAiEvents.map(e => e.description.toLowerCase()).join(' ');
+    // -15% si bombardements
+    if (combinedDesc.includes('bombarde') || combinedDesc.includes('frappe aérienne')) {
+        calcMilitary -= 15;
+    }
+    // -5% si pertes
+    if (combinedDesc.includes('pertes') || combinedDesc.includes('victimes') || combinedDesc.includes('défait')) {
+        calcMilitary -= 5;
+    }
+    // -70% si nucléaire sur le joueur
+    if (combinedDesc.includes('nucléaire') && combinedDesc.includes('subi')) {
+        calcMilitary -= 70;
+    }
+
+    // 5. CLAMP (Bornes 0-100)
+    const newGlobalTension = clamp(calcTension);
+    const newEconomyHealth = clamp(calcEconomy);
+    const newPopularity = clamp(calcPopularity);
+    const newCorruption = clamp(calcCorruption);
+    const newMilitaryPower = clamp(calcMilitary);
+
+    // ... (Reste de la logique identique)
+
     let newHasSpaceProgram = gameState.hasSpaceProgram;
     if (result.spaceProgramActive === true) {
         newHasSpaceProgram = true;
         if (!gameState.hasSpaceProgram) showNotification("Programme spatial activé !");
     }
 
-    if (result.nuclearAcquired === true && !gameState.hasNuclear) { // Fix: Check against OLD state
+    // Check nuclear overrides
+    if (!newHasNuclear && finalOrderString.toLowerCase().includes("nucléaire")) {
+        const successKeywords = ["réussite", "succès", "opérationnel", "acquis", "développé", "doté"];
+        const aiResponseText = newAiEvents.map(e => e.description.toLowerCase() + " " + e.headline.toLowerCase()).join(" ");
+        if (successKeywords.some(kw => aiResponseText.includes(kw))) {
+            newHasNuclear = true;
+            result.nuclearAcquired = true;
+        }
+    }
+
+    if (result.nuclearAcquired === true && !gameState.hasNuclear) {
         newHasNuclear = true;
         showNotification("⚠️ ARME NUCLÉAIRE OPÉRATIONNELLE ⚠️");
         const nukeEvent: GameEvent = {
@@ -939,7 +986,6 @@ const App: React.FC = () => {
     let gameOver = false;
     let failReason = null;
 
-    // Check game over only if player lost CORE country. Provinces don't count for game over if lost.
     if (!newOwnedTerritories.includes(gameState.playerCountry)) {
         gameOver = true;
         failReason = "Votre nation a été entièrement annexée. Votre gouvernement est tombé.";
@@ -1084,10 +1130,6 @@ const App: React.FC = () => {
       </div>
   );
   
-  // Reste du composant App identique... (La logique d'affichage est inchangée sauf props passées à WorldMap)
-  // Je retourne le bloc complet pour éviter les erreurs de syntaxe, 
-  // mais la majorité du JSX reste identique au fichier précédent.
-
   if (appMode === 'portal_landing') {
       return (
           <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-black selection:text-white overflow-x-hidden">

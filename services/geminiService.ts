@@ -185,12 +185,11 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 // --- SYSTEM INSTRUCTIONS ---
 const SYSTEM_INSTRUCTION = `
 Moteur GeoSim. Règles:
-1. STATS (gt,ec,mi,po,co): DOIVENT CHANGER à chaque tour. Ne laisse jamais tout à 0. Ajoute de la volatilité (-3 à +3) même sans événement majeur.
+1. STATS (gt,ec,mi,po,co): Ne touche aux statistiques que si l'action du joueur le justifie explicitement (Ex: Investissement = +eco). Sinon laisse à 0. Le jeu gère l'usure automatique.
 2. CARTE(mu): 'annexation', 'annex_province', 'build_base', 'dissolve'.
 3. INFRA(iu): Civil seulement.
-4. ACTION: Arcade. Si action agressive, tension (gt) doit monter.
-5. IMPORTANT NUCLÉAIRE: Si le joueur dit "doter de l'arme nucléaire", "lancer programme nucléaire" ou similaire et que tu acceptes, TU DOIS METTRE "nu": true dans le JSON.
-6. FORMAT: JSON minifié uniquement.
+4. IMPORTANT NUCLÉAIRE: Si le joueur dit "doter de l'arme nucléaire", "lancer programme nucléaire" ou similaire et que tu acceptes, TU DOIS METTRE "nu": true dans le JSON.
+5. FORMAT: JSON minifié uniquement.
 `;
 
 const callGroq = async (prompt: string, system: string, jsonMode: boolean = true, schema: any = null): Promise<string> => {
