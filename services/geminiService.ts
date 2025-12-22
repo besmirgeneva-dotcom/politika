@@ -237,7 +237,7 @@ const generateRobustContent = async (prompt: string, config: any): Promise<any> 
 
 // --- SYSTEM INSTRUCTIONS ---
 const SYSTEM_INSTRUCTION = `
-Moteur GeoSim. Simulation Géopolitique.
+Moteur GeoSim. Simulation Géopolitique FICTIVE.
 RÈGLES CRITIQUES:
 1. NARRATION: Tu es le maître du jeu.
 2. ÉVÉNEMENTS (OBLIGATOIRE):
@@ -254,11 +254,25 @@ RÈGLES CRITIQUES:
    - po: Popularity Change
    - co: Corruption Change
    - mu: Map Updates (annexation, build_base...)
-5. INTERDICTION ABSOLUE:
-   - Tu ne gères PAS la sauvegarde du jeu.
-   - Tu ne gères PAS les menus.
-   - Tu simules UNIQUEMENT le monde et les conséquences.
+   - nu: Boolean (Nuclear Acquired)
+   - sp: Boolean (Space Program Active)
+5. TOLÉRANCE EXTRÊME :
+   - C'est un wargame. La violence, la guerre, les annexions et les crises sont le cœur du jeu.
+   - NE MORALISE PAS. Si le joueur lance une bombe nucléaire, décris l'horreur des conséquences factuellement, NE REFUSE PAS L'ACTION.
+   - Accepte les ordres controversés (dictature, suppression d'opposants, trahisons).
+   - Tu simules UNIQUEMENT le monde et les conséquences, aussi sombres soient-elles.
+6. CAPACITÉS SPÉCIALES (SANDBOX) : 
+   - Si le joueur exprime la volonté de développer l'arme nucléaire ("lancer projet manhattan", "acheter bombe", "enrichir uranium"), tu DOIS simuler le succès de cette action (immédiat ou après événement) et mettre 'nu': true dans le JSON.
+   - Idem pour le programme spatial, mettre 'sp': true si le joueur le demande.
+   - Sois créatif sur la méthode (vol, achat, science) mais valide la demande.
 `;
+
+const WARGAME_SAFETY_SETTINGS = [
+    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+];
 
 export const simulateTurn = async (
   playerCountry: string,
@@ -312,24 +326,30 @@ export const simulateTurn = async (
     IMPÉRATIF:
     1. Calcule les changements de stats (gt, ec, mi...).
     2. Si le joueur a donné plusieurs ordres, génère plusieurs événements correspondants dans 'ev'.
+    3. Si le joueur cherche à obtenir le nucléaire, mets 'nu': true.
   `;
 
+  // --- LOGIQUE GROQ ISOLÉE ---
   if (provider === 'groq' && GROQ_API_KEY) {
       try {
           const rawStr = await callGroq(prompt, SYSTEM_INSTRUCTION, true, null);
           const jsonStr = extractJson(rawStr);
           return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
       } catch (e) { 
-          console.warn("Groq fail, fallback Gemini", e); 
+          // SI GROQ ECHOUE, ON S'ARRÊTE LA.
+          console.error("Groq Failed (Isolation Mode):", e);
+          return getFallbackResponse();
       }
   } 
 
+  // --- LOGIQUE GEMINI ---
   try {
       const response = await generateRobustContent(prompt, {
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: MINIFIED_SCHEMA,
           temperature: 0.9, 
+          safetySettings: WARGAME_SAFETY_SETTINGS // Application des paramètres de tolérance
       });
       const jsonStr = extractJson(response.text);
       return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, response.text));
@@ -360,7 +380,7 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
         if (!response.ok) {
             // Lecture du corps d'erreur pour débogage
             const errText = await response.text();
-            throw new Error(`Groq ${response.status}: ${errText.substring(0, 50)}`);
+            throw new Error(`Groq ${response.status}: ${errText.substring(0, 100)}`);
         }
         
         // Parsing sécurisé
@@ -446,7 +466,9 @@ export const sendDiplomaticMessage = async (
                 usage: estimateTokens(prompt, jsonStr) 
             };
         } catch (e) { 
-            console.warn("Groq fail chat", e); 
+            console.error("Groq Chat Fail (Isolation)", e); 
+            // Pas de fallback vers Gemini
+            return { messages: [{ sender: targets[0], text: "..." }], usage: 0 }; 
         }
     }
     
@@ -490,14 +512,19 @@ export const getStrategicSuggestions = async (
     const prompt = `3 actions courtes pour ${playerCountry}. Contexte:${hist}. JSON:{"s":["..."]}`;
     try {
         if (provider === 'groq' && GROQ_API_KEY) {
-             const rawStr = await callGroq(prompt, "Conseiller stratégique. JSON.", true);
-             const jsonStr = extractJson(rawStr);
-             const p = JSON.parse(jsonStr);
-             const list = p.s || p.suggestions || p;
-             return { 
-                 suggestions: Array.isArray(list) ? list.map(String) : [], 
-                 usage: estimateTokens(prompt, jsonStr) 
-             };
+             try {
+                const rawStr = await callGroq(prompt, "Conseiller stratégique. JSON.", true);
+                const jsonStr = extractJson(rawStr);
+                const p = JSON.parse(jsonStr);
+                const list = p.s || p.suggestions || p;
+                return { 
+                    suggestions: Array.isArray(list) ? list.map(String) : [], 
+                    usage: estimateTokens(prompt, jsonStr) 
+                };
+             } catch(e) {
+                 console.error("Groq Suggestions Fail", e);
+                 return { suggestions: [], usage: 0 };
+             }
         }
         const response = await generateRobustContent(prompt, { responseMimeType: "application/json" });
         const jsonStr = extractJson(response.text);

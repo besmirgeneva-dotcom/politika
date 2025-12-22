@@ -6,6 +6,7 @@ import HistoryLog from '../components/HistoryLog';
 import ChatInterface from '../components/ChatInterface';
 import AllianceWindow from '../components/AllianceWindow';
 import DateControls from '../components/DateControls';
+import SandboxMenu from '../components/SandboxMenu';
 import { GameState, GameEvent, ChatMessage } from '../types';
 import { isCountryLandlocked, getFlagUrl, ALL_COUNTRIES_LIST } from '../constants';
 import { AIProvider } from '../services/geminiService';
@@ -24,6 +25,7 @@ const StatGauge = ({ label, value, color }: { label: string, value: number, colo
 
 interface ActiveGameProps {
     gameState: GameState;
+    setGameState: React.Dispatch<React.SetStateAction<GameState>>; // Added for Sandbox
     tokenCount: number;
     aiProvider: AIProvider;
     setAiProvider: (p: AIProvider) => void;
@@ -63,13 +65,15 @@ interface ActiveGameProps {
 }
 
 export const ActiveGame: React.FC<ActiveGameProps> = ({
-    gameState, tokenCount, aiProvider, setAiProvider, saveGame, loadGameById, availableSaves,
+    gameState, setGameState, tokenCount, aiProvider, setAiProvider, saveGame, loadGameById, availableSaves,
     handleExitToDashboard, handleNextTurn, handleRegionSelect, focusCountry, eventQueue,
     fullHistory, pendingOrders, playerInput, setPlayerInput, onAddOrder, onReadEvent,
     onGetSuggestions, handleSendChatMessage, hasUnreadChat, typingParticipants, handleMarkChatRead,
     activeWindow, setActiveWindow, isGameMenuOpen, setIsGameMenuOpen, isLoadMenuOpen, setIsLoadMenuOpen,
     showStartModal, pendingCountry, setPendingCountry, confirmCountrySelection
 }) => {
+    
+    const [isSandboxOpen, setIsSandboxOpen] = useState(false);
 
     const toggleWindow = (win: any) => setActiveWindow(activeWindow === win ? 'none' : win);
 
@@ -158,6 +162,8 @@ export const ActiveGame: React.FC<ActiveGameProps> = ({
 
                     <DateControls currentDate={gameState.currentDate} turn={gameState.turn} onNextTurn={handleNextTurn} isProcessing={gameState.isProcessing} />
                     
+                    <SandboxMenu isOpen={isSandboxOpen} onClose={() => setIsSandboxOpen(false)} gameState={gameState} setGameState={setGameState} />
+
                     {activeWindow === 'events' && (
                         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
                             <div className="pointer-events-auto w-full max-w-sm">
@@ -195,6 +201,8 @@ export const ActiveGame: React.FC<ActiveGameProps> = ({
                         <button onClick={() => toggleWindow('chat')} className="bg-stone-800 text-white w-12 h-12 flex items-center justify-center rounded-xl shadow border border-stone-600 relative">💬 {hasUnreadChat && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-bounce"></span>}</button>
                         <button onClick={() => toggleWindow('history')} className="bg-stone-800 text-white w-12 h-12 flex items-center justify-center rounded-xl shadow border border-stone-600">📚</button>
                         {gameState.alliance && <button onClick={() => toggleWindow('alliance')} className="bg-blue-600 text-white w-12 h-12 flex items-center justify-center rounded-xl shadow border border-blue-400">🛡️</button>}
+                        {/* BOUTON SANDBOX */}
+                        <button onClick={() => setIsSandboxOpen(true)} className="bg-purple-900 text-white w-12 h-12 flex items-center justify-center rounded-xl shadow-lg border border-purple-500 hover:bg-purple-800 transition-colors">⚡</button>
                     </div>
                 </>
             )}
@@ -222,3 +230,5 @@ export const ActiveGame: React.FC<ActiveGameProps> = ({
         </div>
     );
 }
+
+export default ActiveGame;

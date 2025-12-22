@@ -232,6 +232,11 @@ const App: React.FC = () => {
     let newNeutral = [...(gameState.neutralTerritories || [])];
     let newEntities = [...gameState.mapEntities];
     let newHasNuclear = gameState.hasNuclear;
+    let newHasSpaceProgram = gameState.hasSpaceProgram;
+
+    // --- MISE A JOUR DES CAPACITÉS SPÉCIALES (SANDBOX) ---
+    if (result.nuclearAcquired) newHasNuclear = true;
+    if (result.spaceProgramActive) newHasSpaceProgram = true;
 
     if (result.mapUpdates) {
         for (const update of result.mapUpdates) {
@@ -269,7 +274,8 @@ const App: React.FC = () => {
     const newGameState = {
         ...gameState, currentDate: nextDate, turn: gameState.turn + 1,
         ownedTerritories: newOwned, neutralTerritories: newNeutral,
-        mapEntities: newEntities, hasNuclear: newHasNuclear, isProcessing: false,
+        mapEntities: newEntities, hasNuclear: newHasNuclear, hasSpaceProgram: newHasSpaceProgram,
+        isProcessing: false,
         globalTension: newGlobalTension,
         economyHealth: newEconomyHealth,
         militaryPower: newMilitaryPower,
@@ -398,6 +404,7 @@ const App: React.FC = () => {
         {appMode === 'game_active' && (
             <ActiveGame
                 gameState={gameState}
+                setGameState={setGameState} // NOUVEAU: On passe le setter pour le mode Sandbox
                 tokenCount={tokenCount}
                 aiProvider={aiProvider}
                 setAiProvider={setAiProvider}
