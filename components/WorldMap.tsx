@@ -298,10 +298,26 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
   };
 
   const getMarkerPosition = (entity: MapEntity): [number, number] | null => {
+      // Si l'IA a fourni des coordonnées explicites (cas rare mais possible), on les utilise
       if (entity.lat !== 0 || entity.lng !== 0) return [entity.lat, entity.lng];
-      const f = featureMap.current[entity.country];
+      
+      // Sinon on cherche le centre du pays
+      let f = featureMap.current[entity.country];
+      
+      // Tentative de récupération insensible à la casse si le nom exact échoue
+      if (!f) {
+          const lowerName = entity.country.toLowerCase();
+          const foundKey = Object.keys(featureMap.current).find(k => k.toLowerCase() === lowerName);
+          if (foundKey) f = featureMap.current[foundKey];
+      }
+
       if (f) {
-          const center = centers.find(c => c.name === entity.country);
+          // Recherche dans les centres pré-calculés
+          let center = centers.find(c => c.name === entity.country);
+          if (!center) {
+               const lowerName = entity.country.toLowerCase();
+               center = centers.find(c => c.name.toLowerCase() === lowerName);
+          }
           if (center) return center.center;
       }
       return null;
@@ -338,7 +354,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
         <CapitalMarkers zoom={zoom} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
         
         {groupedEntities.map((group, idx) => {
-             if (zoom < 5) return null;
+             // Affichage des marqueurs dès le zoom 3 (vue monde/continent) pour ne pas les rater
+             if (zoom < 3) return null;
              return (
                 <Marker 
                     key={`group-${idx}`} 

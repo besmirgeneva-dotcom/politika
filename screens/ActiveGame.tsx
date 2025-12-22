@@ -117,6 +117,7 @@ export const ActiveGame: React.FC<ActiveGameProps> = ({
                                 <div className="flex gap-1.5 mt-1 justify-end">
                                     {!isCountryLandlocked(gameState.playerCountry) && <span className="text-[10px]" title="Accès Mer">⚓</span>}
                                     {gameState.hasNuclear && <span className="text-[10px] animate-pulse" title="Nucléaire">☢️</span>}
+                                    {gameState.hasSpaceProgram && <span className="text-[10px]" title="Programme Spatial">🚀</span>}
                                     {gameState.alliance && <span className="text-[10px]" title="Alliance">🛡️</span>}
                                 </div>
                             </div>
