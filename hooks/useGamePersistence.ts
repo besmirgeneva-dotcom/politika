@@ -35,12 +35,28 @@ export const useGamePersistence = (user: any) => {
     }, [user]);
 
     const saveGame = async (state: GameState, history: GameEvent[], aiProvider: string, tokenCount: number, showNotif = true) => {
-        if (!user || !db) { showNotification("Connexion requise !"); return; }
+        if (!user || !db) { 
+            if (showNotif) showNotification("Connexion requise !"); 
+            return; 
+        }
         
-        // Sécurisation de la date : conversion explicite si ce n'est pas un objet Date valide
+        if (!state) {
+            console.error("Tentative de sauvegarde d'un état vide.");
+            return;
+        }
+
+        // Sécurisation de la date : conversion explicite
         let dateStr = "Date Inconnue";
         try {
-            const dateObj = state.currentDate instanceof Date ? state.currentDate : new Date(state.currentDate);
+            let dateObj: Date;
+            if (state.currentDate instanceof Date) {
+                dateObj = state.currentDate;
+            } else if (state.currentDate && typeof (state.currentDate as any).toDate === 'function') {
+                dateObj = (state.currentDate as any).toDate();
+            } else {
+                dateObj = new Date(state.currentDate);
+            }
+
             if (!isNaN(dateObj.getTime())) {
                 dateStr = dateObj.toLocaleDateString('fr-FR');
             }
@@ -97,10 +113,16 @@ export const useGamePersistence = (user: any) => {
             const docSnap = await getDoc(doc(db, "users", user.uid, "games", id));
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                // Re-hydration de la date car JSON.stringify l'a transformée en string
-                if (data.state && typeof data.state.currentDate === 'string') {
-                    data.state.currentDate = new Date(data.state.currentDate);
+                
+                // Re-hydration sécurisée de la date
+                if (data.state && data.state.currentDate) {
+                    if (typeof data.state.currentDate === 'string') {
+                        data.state.currentDate = new Date(data.state.currentDate);
+                    } else if (typeof data.state.currentDate.toDate === 'function') {
+                        data.state.currentDate = data.state.currentDate.toDate();
+                    }
                 }
+                
                 showNotification("Partie chargée.");
                 return data;
             }

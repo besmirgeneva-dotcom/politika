@@ -17,9 +17,16 @@ const estimateTokens = (input: string, output: string): number => {
 // --- JSON EXTRACTION HELPER (ROBUST) ---
 // Extrait le JSON valide même s'il est entouré de texte, en comptant la profondeur des accolades/crochets.
 const extractJson = (text: string): string => {
+    if (!text) return "{}";
+    
     // 1. Trouver le premier caractère ouvrant
     const match = text.match(/(\{|\[)/);
-    if (!match) return "{}";
+    if (!match) {
+        // Si aucun début de JSON n'est trouvé, on retourne un objet vide 
+        // plutôt que le texte brut qui causerait une SyntaxError
+        console.warn("JSON parsing failed: No JSON start found in text", text);
+        return "{}";
+    }
     
     const startIndex = match.index!;
     const openChar = match[0];
@@ -62,7 +69,6 @@ const extractJson = (text: string): string => {
     }
     
     // Fallback: Si on n'a pas trouvé la fermeture (JSON tronqué?), on renvoie tout depuis le début
-    // en espérant que le parser s'en sorte ou échoue proprement.
     return text.substring(startIndex);
 };
 
@@ -326,7 +332,6 @@ export const simulateTurn = async (
           responseSchema: MINIFIED_SCHEMA,
           temperature: 0.9, 
       });
-      // Utilisez extractJson même ici au cas où le modèle envelopperait le JSON dans du markdown
       const jsonStr = extractJson(response.text);
       return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, response.text));
   } catch (error) { 
@@ -418,7 +423,6 @@ export const sendDiplomaticMessage = async (
             const jsonStr = extractJson(rawStr);
             const raw = JSON.parse(jsonStr);
             
-            // Normalisation des données pour éviter les crashs si l'IA renvoie null
             const arr = Array.isArray(raw) ? raw : (raw.messages || [raw]);
             return { 
                 messages: arr.map((r: any) => ({ 
@@ -429,7 +433,6 @@ export const sendDiplomaticMessage = async (
             };
         } catch (e) { 
             console.warn("Groq fail chat", e); 
-            // Continue fallback
         }
     }
     
