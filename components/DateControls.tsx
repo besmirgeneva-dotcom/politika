@@ -1,7 +1,8 @@
+
 import React from 'react';
 
 interface DateControlsProps {
-  currentDate: Date;
+  currentDate: Date | string; // Accepte string au cas où la sérialisation a échoué
   turn: number;
   onNextTurn: () => void;
   isProcessing: boolean;
@@ -14,11 +15,15 @@ const DateControls: React.FC<DateControlsProps> = ({
     isProcessing 
 }) => {
   
-  const formattedDate = currentDate.toLocaleDateString('fr-FR', {
+  // Sécurisation de la date pour éviter le crash "toLocaleDateString is not a function"
+  const dateObj = currentDate instanceof Date ? currentDate : new Date(currentDate);
+  const isValidDate = !isNaN(dateObj.getTime());
+
+  const formattedDate = isValidDate ? dateObj.toLocaleDateString('fr-FR', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
-  });
+  }) : 'Date Inconnue';
 
   return (
     <div className="absolute bottom-6 right-6 z-30 flex flex-col items-end gap-2">
