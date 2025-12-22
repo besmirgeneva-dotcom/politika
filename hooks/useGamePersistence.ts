@@ -37,15 +37,25 @@ export const useGamePersistence = (user: any) => {
     const saveGame = async (state: GameState, history: GameEvent[], aiProvider: string, tokenCount: number, showNotif = true) => {
         if (!user || !db) { showNotification("Connexion requise !"); return; }
         
+        // Sécurisation de la date : conversion explicite si ce n'est pas un objet Date valide
+        let dateStr = "Date Inconnue";
+        try {
+            const dateObj = state.currentDate instanceof Date ? state.currentDate : new Date(state.currentDate);
+            if (!isNaN(dateObj.getTime())) {
+                dateStr = dateObj.toLocaleDateString('fr-FR');
+            }
+        } catch (err) {
+            console.warn("Date invalide lors de la sauvegarde", err);
+        }
+
         const metadata: SaveMetadata = {
             id: state.gameId, country: state.playerCountry || "Inconnu",
-            date: state.currentDate.toLocaleDateString('fr-FR'), turn: state.turn, lastPlayed: Date.now()
+            date: dateStr, turn: state.turn, lastPlayed: Date.now()
         };
 
         try {
             // SANITIZATION CRITIQUE : Firestore rejette les valeurs 'undefined'.
             // JSON.stringify supprime les clés undefined et convertit les Dates en string ISO.
-            // C'est nécessaire pour que la sauvegarde fonctionne avec des types optionnels.
             const cleanState = JSON.parse(JSON.stringify(state));
             const cleanHistory = JSON.parse(JSON.stringify(history));
 
@@ -88,7 +98,7 @@ export const useGamePersistence = (user: any) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 // Re-hydration de la date car JSON.stringify l'a transformée en string
-                if (typeof data.state.currentDate === 'string') {
+                if (data.state && typeof data.state.currentDate === 'string') {
                     data.state.currentDate = new Date(data.state.currentDate);
                 }
                 showNotification("Partie chargée.");

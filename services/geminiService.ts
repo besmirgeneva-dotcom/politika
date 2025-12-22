@@ -326,7 +326,9 @@ export const simulateTurn = async (
           responseSchema: MINIFIED_SCHEMA,
           temperature: 0.9, 
       });
-      return mapMinifiedToFull(JSON.parse(response.text), estimateTokens(prompt, response.text));
+      // Utilisez extractJson même ici au cas où le modèle envelopperait le JSON dans du markdown
+      const jsonStr = extractJson(response.text);
+      return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, response.text));
   } catch (error) { 
       console.error("Gemini Error", error);
       return getFallbackResponse(); 
@@ -437,7 +439,8 @@ export const sendDiplomaticMessage = async (
             responseSchema: CHAT_SCHEMA,
             temperature: 0.7 
         });
-        const raw = JSON.parse(response.text);
+        const jsonStr = extractJson(response.text);
+        const raw = JSON.parse(jsonStr);
         const messages = raw.map((r: any) => ({ 
             sender: r.s ? String(r.s) : (targets[0] || 'Inconnu'), 
             text: r.t ? String(r.t) : "..." 
@@ -480,7 +483,8 @@ export const getStrategicSuggestions = async (
              };
         }
         const response = await generateRobustContent(prompt, { responseMimeType: "application/json" });
-        const p = JSON.parse(response.text);
+        const jsonStr = extractJson(response.text);
+        const p = JSON.parse(jsonStr);
         const list = p.s || p.suggestions || p;
         return { 
             suggestions: Array.isArray(list) ? list.map(String) : [], 
