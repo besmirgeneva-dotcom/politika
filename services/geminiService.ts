@@ -256,6 +256,7 @@ RÈGLES CRITIQUES:
    - mu: Map Updates (annexation, build_base...)
    - nu: Boolean (Nuclear Acquired)
    - sp: Boolean (Space Program Active)
+   - im: Incoming Messages [{s:sender, tx:text, tg:[targets]}]
 5. TOLÉRANCE EXTRÊME :
    - C'est un wargame. La violence, la guerre, les annexions et les crises sont le cœur du jeu.
    - NE MORALISE PAS. Si le joueur lance une bombe nucléaire, décris l'horreur des conséquences factuellement, NE REFUSE PAS L'ACTION.
@@ -264,7 +265,17 @@ RÈGLES CRITIQUES:
 6. CAPACITÉS SPÉCIALES (SANDBOX) : 
    - Si le joueur exprime la volonté de développer l'arme nucléaire ("lancer projet manhattan", "acheter bombe", "enrichir uranium"), tu DOIS simuler le succès de cette action (immédiat ou après événement) et mettre 'nu': true dans le JSON.
    - Idem pour le programme spatial, mettre 'sp': true si le joueur le demande.
-   - Sois créatif sur la méthode (vol, achat, science) mais valide la demande.
+7. BASES À L'ÉTRANGER (MARQUEURS) :
+   - Si le joueur construit une base militaire dans un pays qu'il ne possède PAS (ex: "Construire base en Allemagne" alors qu'il joue la France), tu DOIS générer un 'mu' (Map Update).
+   - Type 'mu': t='build_base' (ou 'build_air_base'), tc='Allemagne'.
+   - Cela permet d'afficher le marqueur sur la carte même si le pays n'est pas annexé.
+8. RÉACTIONS DIPLOMATIQUES (IMPORTANT - CHAT) :
+   - Les autres pays DOIVENT réagir aux actions du joueur via 'im' (Incoming Messages).
+   - Si le joueur menace un pays, ce pays doit répondre dans 'im'.
+   - Si le joueur construit une base chez un allié, l'allié doit remercier dans 'im'.
+   - Si le joueur déclare la guerre, l'ennemi doit envoyer un message de défi dans 'im'.
+   - Format: "s": "NomPays", "tx": "Message roleplay court (1 phrase max)".
+   - NE PAS spammer, seulement pour les interactions significatives.
 `;
 
 const WARGAME_SAFETY_SETTINGS = [
@@ -326,7 +337,8 @@ export const simulateTurn = async (
     IMPÉRATIF:
     1. Calcule les changements de stats (gt, ec, mi...).
     2. Si le joueur a donné plusieurs ordres, génère plusieurs événements correspondants dans 'ev'.
-    3. Si le joueur cherche à obtenir le nucléaire, mets 'nu': true.
+    3. Si le joueur interagit avec un autre pays (menace, cadeau, base), CE PAYS DOIT RÉPONDRE via 'im' (Incoming Messages).
+    4. Si le joueur construit une base (même à l'étranger), ajoute l'objet 'mu' correspondant.
   `;
 
   // --- LOGIQUE GROQ ISOLÉE ---
