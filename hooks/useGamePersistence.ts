@@ -8,6 +8,35 @@ export interface SaveMetadata {
     id: string; country: string; date: string; turn: number; lastPlayed: number;
 }
 
+// Helper pour nettoyer les objets avant envoi Firestore (retire undefined)
+const sanitizeForFirestore = (obj: any): any => {
+    if (obj === undefined) return null;
+    if (obj === null) return null;
+    if (obj instanceof Date) return obj.toISOString(); // Stocker les dates comme ISO string pour consistance
+    if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
+    if (typeof obj === 'object') {
+        // Détection Firestore Timestamp
+        if (typeof obj.toDate === 'function') return obj.toDate().toISOString();
+        
+        const newObj: any = {};
+        for (const key in obj) {
+            const val = sanitizeForFirestore(obj[key]);
+            if (val !== undefined) newObj[key] = val;
+        }
+        return newObj;
+    }
+    return obj;
+};
+
+// Helper pour parser les dates safe
+const safeDate = (d: any): Date => {
+    if (!d) return new Date();
+    if (d instanceof Date) return d;
+    if (typeof d.toDate === 'function') return d.toDate(); // Firestore Timestamp
+    const parsed = new Date(d);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
 export const useGamePersistence = (user: any) => {
     const [availableSaves, setAvailableSaves] = useState<SaveMetadata[]>([]);
     const [notification, setNotification] = useState<string | null>(null);
@@ -45,23 +74,13 @@ export const useGamePersistence = (user: any) => {
             return;
         }
 
-        // Sécurisation de la date : conversion explicite
+        // Sécurisation de la date pour les métadonnées
         let dateStr = "Date Inconnue";
         try {
-            let dateObj: Date;
-            if (state.currentDate instanceof Date) {
-                dateObj = state.currentDate;
-            } else if (state.currentDate && typeof (state.currentDate as any).toDate === 'function') {
-                dateObj = (state.currentDate as any).toDate();
-            } else {
-                dateObj = new Date(state.currentDate);
-            }
-
-            if (!isNaN(dateObj.getTime())) {
-                dateStr = dateObj.toLocaleDateString('fr-FR');
-            }
+            const d = safeDate(state.currentDate);
+            dateStr = d.toLocaleDateString('fr-FR');
         } catch (err) {
-            console.warn("Date invalide lors de la sauvegarde", err);
+            console.warn("Date invalide métadonnées", err);
         }
 
         const metadata: SaveMetadata = {
@@ -70,10 +89,9 @@ export const useGamePersistence = (user: any) => {
         };
 
         try {
-            // SANITIZATION CRITIQUE : Firestore rejette les valeurs 'undefined'.
-            // JSON.stringify supprime les clés undefined et convertit les Dates en string ISO.
-            const cleanState = JSON.parse(JSON.stringify(state));
-            const cleanHistory = JSON.parse(JSON.stringify(history));
+            // Utilisation de sanitizeForFirestore au lieu de JSON.parse/stringify
+            const cleanState = sanitizeForFirestore(state);
+            const cleanHistory = sanitizeForFirestore(history);
 
             const batch = writeBatch(db);
             batch.set(doc(db, "users", user.uid, "games", state.gameId), { 
@@ -89,7 +107,7 @@ export const useGamePersistence = (user: any) => {
             if (showNotif) showNotification("Sauvegarde Cloud réussie !");
         } catch (e) { 
             console.error("ERREUR SAUVEGARDE:", e);
-            showNotification("Échec Sauvegarde (Voir Console)"); 
+            showNotification("Échec Sauvegarde"); 
         }
     };
 
@@ -114,13 +132,9 @@ export const useGamePersistence = (user: any) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 
-                // Re-hydration sécurisée de la date
-                if (data.state && data.state.currentDate) {
-                    if (typeof data.state.currentDate === 'string') {
-                        data.state.currentDate = new Date(data.state.currentDate);
-                    } else if (typeof data.state.currentDate.toDate === 'function') {
-                        data.state.currentDate = data.state.currentDate.toDate();
-                    }
+                // Re-hydration robuste de la date dans le state
+                if (data.state) {
+                    data.state.currentDate = safeDate(data.state.currentDate);
                 }
                 
                 showNotification("Partie chargée.");

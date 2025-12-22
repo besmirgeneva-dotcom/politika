@@ -15,16 +15,13 @@ const estimateTokens = (input: string, output: string): number => {
 };
 
 // --- JSON EXTRACTION HELPER (ROBUST) ---
-// Extrait le JSON valide même s'il est entouré de texte, en comptant la profondeur des accolades/crochets.
 const extractJson = (text: string): string => {
-    if (!text) return "{}";
+    if (!text || typeof text !== 'string') return "{}";
     
-    // 1. Trouver le premier caractère ouvrant
+    // 1. Chercher la première accolade ou crochet ouvrant
     const match = text.match(/(\{|\[)/);
     if (!match) {
-        // Si aucun début de JSON n'est trouvé, on retourne un objet vide 
-        // plutôt que le texte brut qui causerait une SyntaxError
-        console.warn("JSON parsing failed: No JSON start found in text", text);
+        console.warn("No JSON start found in text:", text.substring(0, 50));
         return "{}";
     }
     
@@ -36,11 +33,10 @@ const extractJson = (text: string): string => {
     let inString = false;
     let escape = false;
 
-    // 2. Parcourir pour trouver la fermeture correspondante exacte
+    // 2. Scanner pour trouver la fermeture
     for (let i = startIndex; i < text.length; i++) {
         const char = text[i];
         
-        // Gestion des échappements et chaines de caractères
         if (escape) {
             escape = false;
             continue;
@@ -54,22 +50,23 @@ const extractJson = (text: string): string => {
             continue;
         }
         
-        // Comptage de profondeur (hors string)
         if (!inString) {
             if (char === openChar) {
                 depth++;
             } else if (char === closeChar) {
                 depth--;
-                // Si on revient à 0, c'est la fin du JSON valide
                 if (depth === 0) {
+                    // JSON complet trouvé
                     return text.substring(startIndex, i + 1);
                 }
             }
         }
     }
     
-    // Fallback: Si on n'a pas trouvé la fermeture (JSON tronqué?), on renvoie tout depuis le début
-    return text.substring(startIndex);
+    // Fallback: Si pas de fermeture propre trouvée, on essaye de fermer brutalement si possible
+    // ou on retourne un objet vide pour éviter le crash SyntaxError sur du texte partiel
+    console.warn("JSON malformed or truncated, parsing fallback empty object.");
+    return "{}";
 };
 
 // --- OPTIMIZATION: MINIFIED SCHEMA KEYS ---
@@ -153,7 +150,6 @@ const MINIFIED_SCHEMA = {
 };
 
 // Map the minified JSON back to the full SimulationResponse for the app
-// AJOUT: Sécurisation avec || '' ou || 0 pour éviter les null/undefined qui cassent l'UI
 const mapMinifiedToFull = (min: any, tokens: number = 0): SimulationResponse => {
     return {
         timeIncrement: min.ti || 'day',
@@ -200,7 +196,6 @@ const mapMinifiedToFull = (min: any, tokens: number = 0): SimulationResponse => 
     };
 };
 
-// --- RETRY LOGIC ---
 const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
     try {
         return await fn();
@@ -321,7 +316,6 @@ export const simulateTurn = async (
           return mapMinifiedToFull(JSON.parse(jsonStr), estimateTokens(prompt, jsonStr));
       } catch (e) { 
           console.warn("Groq fail, fallback Gemini", e); 
-          // Continue to fallback
       }
   } 
 
@@ -357,9 +351,24 @@ const callGroq = async (prompt: string, system: string, jsonMode: boolean = true
                 response_format: jsonMode ? { type: "json_object" } : undefined
             })
         });
-        if (!response.ok) throw new Error(`Groq ${response.status}`);
-        const data = await response.json();
-        return data.choices[0]?.message?.content || "";
+        
+        if (!response.ok) {
+            // Lecture du corps d'erreur pour débogage
+            const errText = await response.text();
+            throw new Error(`Groq ${response.status}: ${errText.substring(0, 50)}`);
+        }
+        
+        // Parsing sécurisé
+        try {
+            const data = await response.json();
+            return data.choices[0]?.message?.content || "";
+        } catch(jsonErr) {
+            // Si Groq renvoie du texte brut malgré le 200 OK
+            const textData = await response.text();
+            console.warn("Groq returned non-JSON 200:", textData.substring(0, 50));
+            return textData; // On laisse extractJson gérer la suite
+        }
+
     } catch (e) { throw e; }
 };
 
