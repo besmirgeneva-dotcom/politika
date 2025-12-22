@@ -2,7 +2,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, GeoJSON, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import * as turf from '@turf/turf';
 import { MapEntity, MapEntityType } from '../types';
 import { getFrenchName } from '../constants';
 
@@ -285,26 +284,13 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
       });
   }, []);
 
-  const displayGeoData = useMemo(() => {
-      if (!geoData || !playerCountry || ownedTerritories.length <= 1) return geoData;
-      const owned = geoData.features.filter((f: any) => ownedTerritories.includes(f.properties.name));
-      const others = geoData.features.filter((f: any) => !ownedTerritories.includes(f.properties.name));
-      try {
-          let merged = owned[0];
-          for (let i = 1; i < owned.length; i++) {
-              const u = turf.union(merged, owned[i]);
-              if (u) merged = u;
-          }
-          if (merged) merged.properties = { ...merged.properties, name: playerCountry };
-          return { type: "FeatureCollection", features: [...others, merged] };
-      } catch (e) { return geoData; }
-  }, [geoData, ownedTerritories, playerCountry]);
-
   const style = (f: any) => {
     const name = f.properties.name;
     const isPlayer = playerCountry === name;
+    // Vérification simplifiée et robuste de l'appartenance
     const isOwned = ownedTerritories.includes(name);
     const isNeutral = neutralTerritories.includes(name);
+    
     return {
       fillColor: isPlayer ? "#22c55e" : isOwned ? "#4ade80" : isNeutral ? "#7f1d1d" : "#d1d5db",
       weight: 1, opacity: 1, color: '#ffffff', fillOpacity: 1
@@ -329,7 +315,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
           const pos = getMarkerPosition(entity);
           if (!pos) return;
           
-          // On utilise une clé basée sur une précision réduite pour regrouper les points très proches
           const key = `${pos[0].toFixed(3)},${pos[1].toFixed(3)}`;
           
           if (!groups[key]) {
@@ -339,7 +324,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
       });
       
       return Object.values(groups);
-  }, [mapEntities, centers, featureMap]); // Recalculer si les entités ou la carte changent
+  }, [mapEntities, centers, featureMap]);
 
   if (!geoData) return <div className="text-stone-500 text-center mt-20">Initialisation satellite...</div>;
 
@@ -347,13 +332,13 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
     <MapContainer zoomControl={false} center={[20, 0]} zoom={3} style={{ height: '100%', width: '100%', background: '#e0f2fe' }} minZoom={2} maxZoom={10} maxBounds={[[-90, -180], [90, 180]]}>
         <MapController onZoomChange={setZoom} />
         <FlyToCountry targetCountry={focusCountry} centers={centers} />
-        <GeoJSON key={`map-${ownedTerritories.length}-${neutralTerritories.length}`} data={displayGeoData || geoData} style={style} onEachFeature={(f, l) => l.on('click', () => onRegionClick(f.properties.name))} />
+        {/* On utilise directement geoData sans fusionner les géométries pour éviter les crashs de turf.union */}
+        <GeoJSON key={`map-${ownedTerritories.length}-${neutralTerritories.length}`} data={geoData} style={style} onEachFeature={(f, l) => l.on('click', () => onRegionClick(f.properties.name))} />
         <MapLabels zoom={zoom} visibleCountries={centers} playerCountry={playerCountry} ownedTerritories={ownedTerritories} neutralTerritories={neutralTerritories} />
         <CapitalMarkers zoom={zoom} ownedTerritories={ownedTerritories} playerCountry={playerCountry} />
         
-        {/* Render Grouped Markers */}
         {groupedEntities.map((group, idx) => {
-             if (zoom < 5) return null; // Ne pas afficher si trop dézoomé pour éviter le clutter
+             if (zoom < 5) return null;
              return (
                 <Marker 
                     key={`group-${idx}`} 
@@ -361,7 +346,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onRegionClick, playerCountry, owned
                     icon={createGroupedIcon(group.entities, zoom)} 
                     zIndexOffset={1100}
                 >
-                    {/* Le Popup reste disponible au clic si besoin */}
                     <Popup>
                         <div className="text-xs font-bold">
                             {group.entities.map((e, i) => (

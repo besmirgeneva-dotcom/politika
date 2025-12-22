@@ -241,9 +241,9 @@ Moteur GeoSim. Simulation Géopolitique.
 RÈGLES CRITIQUES:
 1. NARRATION: Tu es le maître du jeu.
 2. ÉVÉNEMENTS (OBLIGATOIRE):
-   - Tu DOIS générer au moins 2 événements dans le tableau 'ev' à CHAQUE réponse.
-   - Si le joueur fait une action, le premier événement 'ev' doit décrire le résultat (succès/échec).
-   - Le second événement doit être une actualité mondiale (crise, économie, guerre ailleurs).
+   - **Tu DOIS générer un événement DISTINCT pour CHAQUE ordre donné par le joueur.**
+   - Si le joueur donne 3 ordres, il doit y avoir au moins 3 événements 'ev' qui décrivent le résultat de chacun.
+   - Ajoute ensuite au moins 1 événement d'actualité mondiale (crise, économie, guerre ailleurs) sans lien avec le joueur.
    - NE RENVOIE JAMAIS 'ev' VIDE.
 3. STATISTIQUES: Fais évoluer les valeurs (gt, ec, mi, po, co) selon l'action.
 4. FORMAT JSON MINIFIÉ (Clés):
@@ -286,12 +286,17 @@ export const simulateTurn = async (
     territoryStr = `${core} (+${ownedTerritories.length - 3} others)`;
   }
 
-  const neutralStr = neutralTerritories.length > 0 
-      ? (neutralTerritories.length > 20 
-          ? `${neutralTerritories.slice(0, 20).join(',')} (+${neutralTerritories.length - 20} déserts)` 
-          : neutralTerritories.join(',')) 
-      : "Aucun";
-  
+  // Transformation des ordres multilignes en liste numérotée claire
+  const formattedActions = playerAction
+    .split('\n')
+    .filter(line => line.trim().length > 0)
+    .map((line, index) => `${index + 1}. ${line}`)
+    .join('\n');
+
+  const actionPrompt = formattedActions 
+    ? `LISTE DES ORDRES PRIORITAIRES DU JOUEUR (Traiter chacun séparément) :\n${formattedActions}`
+    : "Gouverner le pays (Maintenance standard)";
+
   const prompt = `
     CONTEXTE:
     Date:${currentDate} | Pays:${playerCountry} | Puissance:${playerPower}
@@ -299,14 +304,14 @@ export const simulateTurn = async (
     Alliances:${allContext} | Chaos:${chaosLevel}
     Territoires:${territoryStr}
     
-    ACTION JOUEUR: "${playerAction || "Gouverner le pays"}"
+    ${actionPrompt}
     
     HISTORIQUE RÉCENT: ${hist}
     
     TÂCHE: Simuler le tour en JSON.
     IMPÉRATIF:
     1. Calcule les changements de stats (gt, ec, mi...).
-    2. REMPLIS OBLIGATOIREMENT le tableau 'ev' avec 2 ou 3 événements narratifs (Réussite de l'action joueur + Actualité mondiale).
+    2. Si le joueur a donné plusieurs ordres, génère plusieurs événements correspondants dans 'ev'.
   `;
 
   if (provider === 'groq' && GROQ_API_KEY) {
